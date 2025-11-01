@@ -22,15 +22,17 @@
     data-npa="1"
     crossorigin="anonymous"></script>
 
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin: 0; background: #f9fafb; font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    .ad-wrapper { width: 100%; display: flex; justify-content: center; padding: 1.5rem 0; }
+    .app-shell { min-height: 100vh; }
+    iframe { width: 100%; border: none; min-height: 1200px; }
+  </style>
 </head>
 
-<body class="bg-gray-50">
+<body>
   <!-- Top Ad -->
-  <div class="w-full flex justify-center py-4">
+  <div class="ad-wrapper">
     <ins class="adsbygoogle"
          style="display:block"
          data-ad-client="ca-pub-1234567890"
@@ -40,12 +42,12 @@
     <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
   </div>
 
-  <div id="root" class="min-h-screen">
-    <iframe src="app.html" width="100%" height="1000" style="border:none;"></iframe>
+  <div class="app-shell">
+    <iframe id="app-frame" src="app.html" title="Balanced Team Builder"></iframe>
   </div>
 
   <!-- Bottom Ad -->
-  <div class="w-full flex justify-center py-4">
+  <div class="ad-wrapper">
     <ins class="adsbygoogle"
          style="display:block"
          data-ad-client="ca-pub-1234567890"
@@ -54,5 +56,28 @@
          data-full-width-responsive="true"></ins>
     <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
   </div>
+
+  <script>
+    const frame = document.getElementById('app-frame');
+    function adjustFrameHeight() {
+      if (!frame || !frame.contentWindow) return;
+      try {
+        const doc = frame.contentWindow.document;
+        const height = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
+        frame.style.height = (height || 1200) + 'px';
+      } catch (err) {
+        console.warn('Unable to resize iframe:', err);
+      }
+    }
+    if (frame) {
+      frame.addEventListener('load', () => {
+        adjustFrameHeight();
+        frame.contentWindow.addEventListener('resize', adjustFrameHeight);
+        setTimeout(adjustFrameHeight, 500);
+      });
+      window.addEventListener('resize', adjustFrameHeight);
+      setInterval(adjustFrameHeight, 2000);
+    }
+  </script>
 </body>
 </html>

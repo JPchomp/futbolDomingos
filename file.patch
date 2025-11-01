@@ -1,0 +1,1669 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000000000000000000000000000000000000..7cc6307c5496787572de06a3a01684ab50529459
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,5 @@
++node_modules
++npm-debug.log*
++dist
++app.js.map
++.DS_Store
+diff --git a/app.html b/app.html
+index 42280ccad8e8b3276deae6350cb1bf2bf7b46cee..f06451ccb8410034a0bfde2f3b74fff04fb0a6c0 100644
+--- a/app.html
++++ b/app.html
+@@ -1,783 +1,23 @@
+-import React, { useMemo, useState } from "react";
+-
+-// util: generate ids
+-const uid = () => Math.random().toString(36).slice(2, 9);
+-
+-// util: seeded shuffle (deterministic for same seed)
+-export function seededShuffle(arr, seed) {
+-  if (!seed) return [...arr];
+-  let s = 0;
+-  for (let i = 0; i < seed.length; i++) {
+-    s = (s * 31 + seed.charCodeAt(i)) >>> 0;
+-  }
+-  function rand() {
+-    s = (1664525 * s + 1013904223) >>> 0;
+-    return s / 2 ** 32;
+-  }
+-  const a = [...arr];
+-  for (let i = a.length - 1; i > 0; i--) {
+-    const j = Math.floor(rand() * (i + 1));
+-    [a[i], a[j]] = [a[j], a[i]];
+-  }
+-  return a;
+-}
+-
+-// Parse lines like: "12 John Doe" or "7.5 - Jane Smith" or just "Carlos"
+-// Numbers are ignored. Everyone starts at score 5. Nat defaults to NA.
+-export function parseListIgnoreNumbers(text) {
+-  const lines = text.split(/\r?\n/);
+-  const out = [];
+-  for (let raw of lines) {
+-    const line = raw.trim();
+-    if (!line) continue;
+-    let name = line.replace(/^\s*\d+(?:[.,]\d+)?\s*(?:[-,:\t ]+)?\s*/i, "").trim();
+-    name = name.replace(/\./g, "").trim();
+-    if (!name) continue;
+-    if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(name)) continue;
+-    out.push({ id: uid(), name, score: 5, nat: "NA", pos1: "", pos2: "" });
+-  }
+-  return out;
+-}
+-
+-// build clipboard text for teams (one big block)
+-// rules:
+-// - for each team: "Team N"
+-// - if ANY player in that team has a position -> header "Name,Pos" and each line is name or name,pos
+-// - if NO players in that team have a position -> header "Name" and each line is just name
+-export function buildClipboardTeams(teams) {
+-  const lines = [];
+-  (teams || []).forEach((t, idx) => {
+-    lines.push(`Team ${idx + 1}`);
+-    const members = t.members || [];
+-    const hasAnyPos = members.some(
+-      (m) => (m.pos1 && m.pos1.trim()) || (m.pos2 && m.pos2.trim())
+-    );
+-    if (hasAnyPos) {
+-      lines.push("Name,Pos");
+-      members.forEach((m) => {
+-        const pos = (m.pos1 && m.pos1.trim()) ? m.pos1.trim() : "";
+-        if (pos) {
+-          lines.push(`${m.name},${pos}`);
+-        } else {
+-          lines.push(m.name);
+-        }
+-      });
+-    } else {
+-      lines.push("Name");
+-      members.forEach((m) => {
+-        lines.push(m.name);
+-      });
+-    }
+-    lines.push("");
+-  });
+-  return lines.join("\n");
+-}
+-
+-// basic runtime tests (will just log in browser devtools)
+-if (typeof console !== "undefined") {
+-  const p = parseListIgnoreNumbers(
+-    "12. Luis Miguel\n7.5 - Jane Smith.\n...\n  33 Carlos"
+-  );
+-  console.assert(p.length === 3, "parseListIgnoreNumbers should keep 3 valid names");
+-  console.assert(p[0].name === "Luis Miguel", "first name cleaned");
+-  const sh = seededShuffle([1, 2, 3, 4], "x");
+-  console.assert(
+-    Array.isArray(sh) && sh.length === 4,
+-    "seededShuffle returns array"
+-  );
+-  // clipboard base format
+-  const clip = buildClipboardTeams([
+-    { name: "Team 1", members: [{ name: "A", pos1: "D" }, { name: "B", pos1: "M" }] },
+-    { name: "Team 2", members: [{ name: "C", pos1: "F" }] },
+-  ]);
+-  console.assert(
+-    clip.includes("Team 1") &&
+-      clip.includes("Name,Pos") &&
+-      clip.includes("A,D"),
+-    "clipboard base format ok"
+-  );
+-  // clipboard no-pos format
+-  const clipNoPos = buildClipboardTeams([
+-    { name: "Team 3", members: [{ name: "X", pos1: "" }, { name: "Y", pos1: "" }] },
+-  ]);
+-  console.assert(
+-    clipNoPos.includes("Team 3") &&
+-      clipNoPos.includes("Name\nX\nY"),
+-    "clipboard no-pos format ok"
+-  );
+-}
+-
+-export default function App() {
+-  const [players, setPlayers] = useState([]);
+-  const [numTeams, setNumTeams] = useState(2);
+-  const [teamSize, setTeamSize] = useState(5);
+-  const [seed, setSeed] = useState("");
+-  const [sameNatWeight, setSameNatWeight] = useState(1.0);
+-  const [posWeight, setPosWeight] = useState(2.0);
+-  const [scoreWeight, setScoreWeight] = useState(1.0);
+-  const [pasteText, setPasteText] = useState("");
+-  const [appendMode, setAppendMode] = useState(false);
+-  const [lockedTeam, setLockedTeam] = useState(null);
+-
+-  function validPlayers(rows) {
+-    return rows
+-      .map((r) => {
+-        const nat = (r.nat || "").trim();
+-        return {
+-          ...r,
+-          name: (r.name || "").trim(),
+-          nat: nat ? nat : "NA",
+-          pos1: (r.pos1 || "").trim(),
+-          pos2: (r.pos2 || "").trim(),
+-          score: Number.isFinite(Number(r.score)) ? Number(r.score) : 5,
+-        };
+-      })
+-      .filter((r) => r.name);
+-  }
+-
+-  function allPositions(rows) {
+-    const set = new Set();
+-    rows.forEach((r) => {
+-      if (r.pos1) set.add(r.pos1);
+-      if (r.pos2) set.add(r.pos2);
+-    });
+-    return Array.from(set).sort();
+-  }
+-
+-  const result = useMemo(() => {
+-    const rows = validPlayers(players);
+-    const needed = numTeams * teamSize;
+-    if (numTeams < 1 || teamSize < 1)
+-      return {
+-        error: "Set teams and size.",
+-        teams: [],
+-        targets: [],
+-        allPos: [],
+-        bench: [],
+-        used: 0,
+-      };
+-    if (rows.length < needed)
+-      return {
+-        error: `Need ${needed} players, have ${rows.length}.`,
+-        teams: [],
+-        targets: [],
+-        allPos: [],
+-        bench: [],
+-        used: 0,
+-      };
+-
+-    const orderedAll = seededShuffle(
+-      [...rows].sort(
+-        (a, b) => b.score - a.score || a.name.localeCompare(b.name)
+-      ),
+-      seed
+-    );
+-    const pool = orderedAll.slice(0, needed);
+-    const bench = orderedAll.slice(needed);
+-
+-    const allPos = allPositions(pool);
+-    const posCounts = Object.fromEntries(allPos.map((p) => [p, 0]));
+-    pool.forEach((r) => {
+-      if (r.pos1) posCounts[r.pos1] = (posCounts[r.pos1] || 0) + 1;
+-    });
+-    const targets = Array.from({ length: numTeams }, () => ({}));
+-    for (const pos of allPos) {
+-      const total = posCounts[pos] || 0;
+-      const q = Math.floor(total / numTeams);
+-      let rem = total % numTeams;
+-      for (let t = 0; t < numTeams; t++) targets[t][pos] = q + (t < rem ? 1 : 0);
+-    }
+-
+-    const teams = Array.from({ length: numTeams }, (_, i) => ({
+-      name: `Team ${i + 1}`,
+-      members: [],
+-      score: 0,
+-      pos: {},
+-      nat: {},
+-    }));
+-    const avgScore = pool.reduce((s, r) => s + r.score, 0) / numTeams;
+-
+-    const activeLock = lockedTeam && lockedTeam.index < numTeams ? lockedTeam : null;
+-    const lockedIdSet = new Set(activeLock ? activeLock.memberIds : []);
+-    const assignedLocked = new Set();
+-
+-    if (activeLock) {
+-      const t = teams[activeLock.index];
+-      for (const r of pool) {
+-        if (!lockedIdSet.has(r.id)) continue;
+-        if (t.members.length >= teamSize) continue;
+-        t.members.push(r);
+-        t.score += r.score;
+-        if (r.pos1) t.pos[r.pos1] = (t.pos[r.pos1] || 0) + 1;
+-        if (r.pos2) t.pos[r.pos2] = (t.pos[r.pos2] || 0);
+-        if (r.nat) t.nat[r.nat] = (t.nat[r.nat] || 0) + 1;
+-        assignedLocked.add(r.id);
+-      }
+-    }
+-
+-    function teamCost(ti, r) {
+-      const t = teams[ti];
+-      if (t.members.length >= teamSize) return 1e9;
+-      const scoreBalance = Math.abs(t.score + r.score - avgScore) * scoreWeight;
+-      let deficit = 0;
+-      const positions = [r.pos1, r.pos2].filter(Boolean);
+-      if (positions.length) {
+-        let best = 0;
+-        for (const p of positions) {
+-          const have = t.pos[p] || 0;
+-          const need = targets[ti][p] || 0;
+-          const d = have < need ? need - have - 0.5 : 0;
+-          if (d > best) best = d;
+-        }
+-        deficit = best * posWeight;
+-      }
+-      const natCount = r.nat ? t.nat[r.nat] || 0 : 0;
+-      const natCohesion = -sameNatWeight * natCount;
+-      return scoreBalance + deficit + natCohesion;
+-    }
+-
+-    for (const r of pool) {
+-      if (assignedLocked.has(r.id)) continue;
+-      let bestI = 0,
+-        bestC = Infinity;
+-      for (let ti = 0; ti < numTeams; ti++) {
+-        const c = teamCost(ti, r);
+-        if (
+-          c < bestC ||
+-          (c === bestC && teams[ti].members.length < teams[bestI].members.length)
+-        ) {
+-          bestI = ti;
+-          bestC = c;
+-        }
+-      }
+-      const t = teams[bestI];
+-      t.members.push(r);
+-      t.score += r.score;
+-      if (r.pos1) t.pos[r.pos1] = (t.pos[r.pos1] || 0) + 1;
+-      if (r.pos2) t.pos[r.pos2] = (t.pos[r.pos2] || 0);
+-      if (r.nat) t.nat[r.nat] = (t.nat[r.nat] || 0) + 1;
+-    }
+-
+-    teams.forEach((t) =>
+-      t.members.sort(
+-        (a, b) => (a.pos1 || "").localeCompare(b.pos1 || "") || a.name.localeCompare(b.name)
+-      )
+-    );
+-
+-    return { teams, targets, allPos, bench, used: pool.length, error: undefined };
+-  }, [players, numTeams, teamSize, seed, sameNatWeight, posWeight, scoreWeight, lockedTeam]);
+-
+-  function setSamples() {
+-    const seedData = [
+-      ["Carlos", 5, "col", "f", ""],
+-      ["Coco", 5, "ar", "d", ""],
+-      ["franco", 5, "ch", "d", ""],
+-      ["Luis Miguel", 5, "col", "f", ""],
+-      ["Mohamed Eid", 5, "eg", "m", ""],
+-      ["pol", 5, "es", "m", ""],
+-      ["JP", 5, "ar", "f", ""],
+-      ["Clem", 5, "fr", "f", ""],
+-      ["Martin", 5, "ar", "d", ""],
+-      ["Facu", 5, "ar", "m", ""],
+-      ["Tincho", 5, "ar", "d", ""],
+-      ["Ismail", 5, "nl", "d", ""],
+-      ["Jannick", 5, "nl", "f", ""],
+-      ["Edgar", 5, "col", "d", ""],
+-      ["Meander", 5, "nl", "f", "m"],
+-      ["Mateo", 5, "ar", "m", "f"],
+-      ["Damo", 5, "ar", "d", ""],
+-      ["Dimitris", 5, "gr", "f", ""],
+-    ];
+-    setPlayers(
+-      seedData.map(([name, score, nat, pos1, pos2]) => ({
+-        id: uid(),
+-        name,
+-        score,
+-        nat,
+-        pos1,
+-        pos2,
+-      }))
+-    );
+-    setLockedTeam(null);
+-  }
+-
+-  function applyPaste() {
+-    const parsed = parseListIgnoreNumbers(pasteText);
+-    if (parsed.length === 0) {
+-      alert("No valid lines found. Example: '12 John Doe' or just 'John Doe'");
+-      return;
+-    }
+-    setPlayers((p) => (appendMode ? [...p, ...parsed] : parsed));
+-    setLockedTeam(null);
+-  }
+-
+-  function toggleLockTeam(index) {
+-    if (!result.teams || !result.teams[index]) return;
+-    if (lockedTeam && lockedTeam.index === index) {
+-      setLockedTeam(null);
+-    } else {
+-      setLockedTeam({ index, memberIds: result.teams[index].members.map((m) => m.id) });
+-    }
+-  }
+-
+-  function copyTeamsToClipboard() {
+-    const text = buildClipboardTeams(result.teams || []);
+-    if (!text.trim()) {
+-      alert("No teams to export.");
+-      return;
+-    }
+-    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+-      navigator.clipboard.writeText(text).catch(() => {
+-        window.prompt("Copy the teams below:", text);
+-      });
+-    } else {
+-      window.prompt("Copy the teams below:", text);
+-    }
+-  }
+-
+-  // split teams into up to two rows
+-  const teams = result.teams || [];
+-  const needsTwoRows = teams.length > 3;
+-  const upper = needsTwoRows ? teams.slice(0, Math.ceil(teams.length / 2)) : teams;
+-  const lower = needsTwoRows ? teams.slice(Math.ceil(teams.length / 2)) : [];
+-
+-  return (
+-    <div className="mx-auto max-w-7xl p-6 space-y-6">
+-      <header className="flex items-center justify-between">
+-        <h1 className="text-2xl font-bold">Balanced Team Builder</h1>
+-        <div className="flex gap-2">
+-          <button className="rounded-2xl border px-4 py-2" onClick={setSamples}>
+-            Fill sample data
+-          </button>
+-          <button className="rounded-2xl border px-4 py-2" onClick={() => { setPlayers([]); setLockedTeam(null); }}>
+-            Clear
+-          </button>
+-        </div>
+-      </header>
+-
+-      {/* core settings */}
+-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 rounded-2xl shadow">
+-        <label className="flex flex-col gap-1">
+-          <span className="text-sm text-gray-600">Teams</span>
+-          <input
+-            type="number"
+-            min="1"
+-            value={numTeams}
+-            onChange={(e) => setNumTeams(Math.max(1, Number(e.target.value)))}
+-            className="rounded-xl border px-3 py-2"
+-          />
+-        </label>
+-        <label className="flex flex-col gap-1">
+-          <span className="text-sm text-gray-600">Team size</span>
+-          <input
+-            type="number"
+-            min="1"
+-            value={teamSize}
+-            onChange={(e) => setTeamSize(Math.max(1, Number(e.target.value)))}
+-            className="rounded-xl border px-3 py-2"
+-          />
+-        </label>
+-      </div>
+-
+-      {/* paste list panel */}
+-      <div className="bg-white p-4 rounded-2xl shadow space-y-2">
+-        <div className="flex items-center justify-between">
+-          <div className="font-semibold">
+-            Paste names: number is ignored. Everyone starts at score 5. Nat = NA.
+-          </div>
+-          <label className="flex items-center gap-2 text-sm">
+-            <input
+-              type="checkbox"
+-              checked={appendMode}
+-              onChange={(e) => setAppendMode(e.target.checked)}
+-            />
+-            Append to existing
+-          </label>
+-        </div>
+-        <textarea
+-          className="w-full h-32 rounded-xl border p-2 font-mono"
+-          value={pasteText}
+-          onChange={(e) => setPasteText(e.target.value)}
+-        />
+-        <div className="flex gap-2">
+-          <button className="rounded-2xl bg-green-600 text-white px-4 py-2" onClick={applyPaste}>
+-            Parse & Add
+-          </button>
+-          <button className="rounded-2xl border px-4 py-2" onClick={() => setPasteText("")}>
+-            Clear text
+-          </button>
+-        </div>
+-      </div>
+-
+-      {/* player table */}
+-      <div className="overflow-hidden rounded-2xl bg-white shadow">
+-        <table className="min-w-full">
+-          <thead className="bg-gray-100 text-left text-sm text-gray-700">
+-            <tr>
+-              <th className="px-3 py-2">Name</th>
+-              <th className="px-3 py-2">Score</th>
+-              <th className="px-3 py-2">Nationality</th>
+-              <th className="px-3 py-2">Primary Pos</th>
+-              <th className="px-3 py-2">Secondary Pos</th>
+-              <th className="px-3 py-2"></th>
+-            </tr>
+-          </thead>
+-          <tbody>
+-            {[...players]
+-              .sort(
+-                (a, b) =>
+-                  (a.pos1 || "").localeCompare(b.pos1 || "") ||
+-                  a.name.localeCompare(b.name)
+-              )
+-              .map((r) => (
+-                <tr key={r.id} className="border-t">
+-                  <td className="px-3 py-2">
+-                    <input
+-                      className="w-full rounded-lg border px-2 py-1"
+-                      value={r.name}
+-                      placeholder="Player"
+-                      onChange={(e) =>
+-                        setPlayers((p) =>
+-                          p.map((rr) =>
+-                            rr.id === r.id ? { ...rr, name: e.target.value } : rr
+-                          )
+-                        )
+-                      }
+-                    />
+-                  </td>
+-                  <td className="px-3 py-2">
+-                    <input
+-                      type="number"
+-                      className="w-24 rounded-lg border px-2 py-1"
+-                      value={r.score}
+-                      onChange={(e) =>
+-                        setPlayers((p) =>
+-                          p.map((rr) =>
+-                            rr.id === r.id ? { ...rr, score: Number(e.target.value) } : rr
+-                          )
+-                        )
+-                      }
+-                    />
+-                  </td>
+-                  <td className="px-3 py-2">
+-                    <input
+-                      className="w-28 rounded-lg border px-2 py-1"
+-                      value={r.nat || "NA"}
+-                      placeholder="e.g. NL"
+-                      onChange={(e) =>
+-                        setPlayers((p) =>
+-                          p.map((rr) =>
+-                            rr.id === r.id ? { ...rr, nat: e.target.value } : rr
+-                          )
+-                        )
+-                      }
+-                    />
+-                  </td>
+-                  <td className="px-3 py-2">
+-                    <input
+-                      className="w-24 rounded-lg border px-2 py-1"
+-                      value={r.pos1 || ""}
+-                      placeholder="e.g. D"
+-                      onChange={(e) =>
+-                        setPlayers((p) =>
+-                          p.map((rr) =>
+-                            rr.id === r.id ? { ...rr, pos1: e.target.value } : rr
+-                          )
+-                        )
+-                      }
+-                    />
+-                  </td>
+-                  <td className="px-3 py-2">
+-                    <input
+-                      className="w-28 rounded-lg border px-2 py-1"
+-                      value={r.pos2 || ""}
+-                      placeholder="optional"
+-                      onChange={(e) =>
+-                        setPlayers((p) =>
+-                          p.map((rr) =>
+-                            rr.id === r.id ? { ...rr, pos2: e.target.value } : rr
+-                          )
+-                        )
+-                      }
+-                    />
+-                  </td>
+-                  <td className="px-3 py-2 text-right">
+-                    <button
+-                      className="rounded-lg border px-2 py-1 text-sm"
+-                      onClick={() =>
+-                        setPlayers((p) => p.filter((rr) => rr.id !== r.id))
+-                      }
+-                    >
+-                      Delete
+-                    </button>
+-                  </td>
+-                </tr>
+-              ))}
+-            <tr>
+-              <td colSpan="6" className="px-3 py-3">
+-                <div className="flex items-center justify-between gap-2">
+-                  <button
+-                    className="rounded-2xl border px-4 py-2 text-sm"
+-                    onClick={() => {
+-                      setPlayers([]);
+-                      setLockedTeam(null);
+-                    }}
+-                  >
+-                    Delete all players
+-                  </button>
+-                  <button
+-                    className="rounded-2xl bg-black px-4 py-2 text-white"
+-                    onClick={() =>
+-                      setPlayers((p) => [
+-                        ...p,
+-                        { id: uid(), name: "", score: 5, nat: "NA", pos1: "", pos2: "" },
+-                      ])
+-                    }
+-                  >
+-                    + Add player
+-                  </button>
+-                </div>
+-              </td>
+-            </tr>
+-          </tbody>
+-        </table>
+-      </div>
+-
+-      {/* shuffle and error info after full player list */}
+-      <div className="flex items-center justify-between gap-4">
+-        <div className="flex gap-2">
+-          <button
+-            className="rounded-2xl bg-indigo-600 text-white px-4 py-2"
+-            onClick={() => setSeed(String(Date.now()))}
+-          >
+-            Re-shuffle
+-          </button>
+-          <button
+-            className="rounded-2xl border px-4 py-2"
+-            onClick={copyTeamsToClipboard}
+-          >
+-            Copy teams
+-          </button>
+-        </div>
+-        {result.error && <div className="text-sm text-red-600">{result.error}</div>}
+-      </div>
+-
+-      {/* importance + summary after player list */}
+-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+-        <div className="bg-white p-4 rounded-2xl shadow space-y-3">
+-          <div className="font-semibold">Importance</div>
+-          <div className="space-y-2">
+-            <label className="block text-sm">
+-              Nationality cohesion: {sameNatWeight.toFixed(1)}
+-              <input
+-                type="range"
+-                min="0"
+-                max="5"
+-                step="0.1"
+-                value={sameNatWeight}
+-                onChange={(e) => setSameNatWeight(Number(e.target.value))}
+-                className="w-full"
+-              />
+-            </label>
+-            <label className="block text-sm">
+-              Position distribution: {posWeight.toFixed(1)}
+-              <input
+-                type="range"
+-                min="0"
+-                max="5"
+-                step="0.1"
+-                value={posWeight}
+-                onChange={(e) => setPosWeight(Number(e.target.value))}
+-                className="w-full"
+-              />
+-            </label>
+-            <label className="block text-sm">
+-              Score balance: {scoreWeight.toFixed(1)}
+-              <input
+-                type="range"
+-                min="0"
+-                max="5"
+-                step="0.1"
+-                value={scoreWeight}
+-                onChange={(e) => setScoreWeight(Number(e.target.value))}
+-                className="w-full"
+-              />
+-            </label>
+-          </div>
+-        </div>
+-
+-        <div className="md:col-span-2 bg-white p-4 rounded-2xl shadow">
+-          <div className="font-semibold mb-2">Summary</div>
+-          <div className="text-sm text-gray-700">Players used: {result.used}</div>
+-          {result.allPos.length > 0 && (
+-            <div className="overflow-auto mt-2">
+-              <table className="min-w-full text-sm">
+-                <thead className="bg-gray-100">
+-                  <tr>
+-                    <th className="px-2 py-1 text-left">Team</th>
+-                    {result.allPos.map((p) => (
+-                      <th key={p} className="px-2 py-1 text-left">
+-                        {p}
+-                      </th>
+-                    ))}
+-                  </tr>
+-                </thead>
+-                <tbody>
+-                  {result.targets.map((row, i) => (
+-                    <tr key={i} className="border-t">
+-                      <td className="px-2 py-1">Team {i + 1}</td>
+-                      {result.allPos.map((p) => (
+-                        <td key={p} className="px-2 py-1">
+-                          {row[p] || 0}
+-                        </td>
+-                      ))}
+-                    </tr>
+-                  ))}
+-                </tbody>
+-              </table>
+-            </div>
+-          )}
+-        </div>
+-      </div>
+-
+-      {/* teams spanning full width, 1 or 2 rows */}
+-      {teams.length > 0 && (
+-        <div className="space-y-4">
+-          <div className="flex gap-4 w-full">
+-            {upper.map((t, i) => (
+-              <div
+-                key={t.name}
+-                style={{ flex: `0 0 ${100 / upper.length}%` }}
+-                className="bg-white p-4 rounded-2xl shadow"
+-              >
+-                <div className="mb-2 flex items-center justify-between gap-2">
+-                  <div>
+-                    <div className="text-lg font-semibold flex items-center gap-2">
+-                      {t.name}
+-                      {lockedTeam?.index === i && (
+-                        <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+-                          Held
+-                        </span>
+-                      )}
+-                    </div>
+-                    <div className="text-sm text-gray-700">
+-                      Total score: {t.score.toFixed(1)}
+-                    </div>
+-                  </div>
+-                  <button
+-                    className={`rounded-xl px-3 py-1 text-xs border ${
+-                      lockedTeam?.index === i
+-                        ? "bg-red-500 text-white border-red-500"
+-                        : "bg-white text-gray-700"
+-                    }`}
+-                    onClick={() => toggleLockTeam(i)}
+-                  >
+-                    {lockedTeam?.index === i ? "Release" : "Hold"}
+-                  </button>
+-                </div>
+-                <div className="overflow-hidden rounded-xl border">
+-                  <table className="min-w-full text-sm">
+-                    <thead className="bg-gray-100 text-left">
+-                      <tr>
+-                        <th className="px-3 py-2">Name</th>
+-                        <th className="px-3 py-2">Nationality</th>
+-                        <th className="px-3 py-2">Pos1</th>
+-                        <th className="px-3 py-2">Pos2</th>
+-                      </tr>
+-                    </thead>
+-                    <tbody>
+-                      {t.members.map((m) => (
+-                        <tr key={m.id} className="border-t">
+-                          <td className="px-3 py-2">{m.name}</td>
+-                          <td className="px-3 py-2">{m.nat || "NA"}</td>
+-                          <td className="px-3 py-2">{m.pos1 || "—"}</td>
+-                          <td className="px-3 py-2">{m.pos2 || "—"}</td>
+-                        </tr>
+-                      ))}
+-                    </tbody>
+-                  </table>
+-                </div>
+-                <div className="mt-2 text-xs text-gray-600">
+-                  Pos mix: {Object.entries(t.pos).map(([p, c]) => `${p}:${c}`).join(" ") || "—"}
+-                </div>
+-                <div className="mt-1 text-xs text-gray-600">
+-                  Nationality mix: {Object.entries(t.nat).map(([n, c]) => `${n}:${c}`).join(" ") || "—"}
+-                </div>
+-              </div>
+-            ))}
+-          </div>
+-          {needsTwoRows && lower.length > 0 && (
+-            <div className="flex gap-4 w-full">
+-              {lower.map((t, idx) => {
+-                const realIndex = upper.length + idx;
+-                return (
+-                  <div
+-                    key={t.name}
+-                    style={{ flex: `0 0 ${100 / lower.length}%` }}
+-                    className="bg-white p-4 rounded-2xl shadow"
+-                  >
+-                    <div className="mb-2 flex items-center justify-between gap-2">
+-                      <div>
+-                        <div className="text-lg font-semibold flex items-center gap-2">
+-                          {t.name}
+-                          {lockedTeam?.index === realIndex && (
+-                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">
+-                              Held
+-                            </span>
+-                          )}
+-                        </div>
+-                        <div className="text-sm text-gray-700">
+-                          Total score: {t.score.toFixed(1)}
+-                        </div>
+-                      </div>
+-                      <button
+-                        className={`rounded-xl px-3 py-1 text-xs border ${
+-                          lockedTeam?.index === realIndex
+-                            ? "bg-red-500 text-white border-red-500"
+-                            : "bg-white text-gray-700"
+-                        }`}
+-                        onClick={() => toggleLockTeam(realIndex)}
+-                      >
+-                        {lockedTeam?.index === realIndex ? "Release" : "Hold"}
+-                      </button>
+-                    </div>
+-                    <div className="overflow-hidden rounded-xl border">
+-                      <table className="min-w-full text-sm">
+-                        <thead className="bg-gray-100 text-left">
+-                          <tr>
+-                            <th className="px-3 py-2">Name</th>
+-                            <th className="px-3 py-2">Nationality</th>
+-                            <th className="px-3 py-2">Pos1</th>
+-                            <th className="px-3 py-2">Pos2</th>
+-                          </tr>
+-                        </thead>
+-                        <tbody>
+-                          {t.members.map((m) => (
+-                            <tr key={m.id} className="border-t">
+-                              <td className="px-3 py-2">{m.name}</td>
+-                              <td className="px-3 py-2">{m.nat || "NA"}</td>
+-                              <td className="px-3 py-2">{m.pos1 || "—"}</td>
+-                              <td className="px-3 py-2">{m.pos2 || "—"}</td>
+-                            </tr>
+-                          ))}
+-                        </tbody>
+-                      </table>
+-                    </div>
+-                    <div className="mt-2 text-xs text-gray-600">
+-                      Pos mix: {Object.entries(t.pos).map(([p, c]) => `${p}:${c}`).join(" ") || "—"}
+-                    </div>
+-                    <div className="mt-1 text-xs text-gray-600">
+-                      Nationality mix: {Object.entries(t.nat).map(([n, c]) => `${n}:${c}`).join(" ") || "—"}
+-                    </div>
+-                  </div>
+-                );
+-              })}
+-            </div>
+-          )}
+-        </div>
+-      )}
+-    </div>
+-  );
+-}
+-
+-// Methodology: 1) clean and normalize input players (strip leading numbers, drop dots, default nationality to "NA", force numeric score). 2) derive needed players from numTeams * teamSize and sort by score then name. 3) compute per-position global counts and split them evenly across teams as targets. 4) assign any locked team first, preserving member ids. 5) assign remaining players greedily to the team with the lowest cost, where cost = score imbalance * scoreWeight + position deficit * posWeight - same-nationality * sameNatWeight. 6) render teams in one or two rows so all panels span the width.
++<!doctype html>
++<html lang="en">
++<head>
++  <meta charset="utf-8" />
++  <meta name="viewport" content="width=device-width, initial-scale=1" />
++  <title>Balanced Team Builder App</title>
++  <link rel="preconnect" href="https://fonts.googleapis.com">
++  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
++  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
++  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
++  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
++  <script src="https://unpkg.com/htm@3/dist/htm.umd.js"></script>
++  <script src="https://cdn.tailwindcss.com"></script>
++  <style>
++    body { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
++  </style>
++</head>
++<body class="bg-gray-50 min-h-screen">
++  <div id="root" class="max-w-6xl mx-auto py-6"></div>
++
++  <script type="module" src="app.js"></script>
++</body>
++</html>
+diff --git a/app.js b/app.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6544eb2d580f13dcf4c96071aa124da9d376830
+--- /dev/null
++++ b/app.js
+@@ -0,0 +1,358 @@
++import {
++  uid,
++  parseListIgnoreNumbers,
++  buildClipboardTeams,
++  normalizePlayers,
++  computeAssignments,
++} from "./logic.js";
++
++const { useMemo, useState } = React;
++const html = htm.bind(React.createElement);
++
++function App() {
++  const [players, setPlayers] = useState([]);
++  const [numTeams, setNumTeams] = useState(2);
++  const [teamSize, setTeamSize] = useState(5);
++  const [seed, setSeed] = useState("");
++  const [sameNatWeight, setSameNatWeight] = useState(1.0);
++  const [posWeight, setPosWeight] = useState(2.0);
++  const [scoreWeight, setScoreWeight] = useState(1.0);
++  const [pasteText, setPasteText] = useState("");
++  const [appendMode, setAppendMode] = useState(false);
++  const [lockedTeam, setLockedTeam] = useState(null);
++
++  const result = useMemo(
++    () =>
++      computeAssignments(players, {
++        numTeams,
++        teamSize,
++        seed,
++        sameNatWeight,
++        posWeight,
++        scoreWeight,
++      }, lockedTeam),
++    [players, numTeams, teamSize, seed, sameNatWeight, posWeight, scoreWeight, lockedTeam]
++  );
++
++  function updatePlayer(id, field, value) {
++    setPlayers((prev) => prev.map((player) => (player.id === id ? { ...player, [field]: value } : player)));
++  }
++
++  function addPlayer() {
++    setPlayers((prev) => [
++      ...prev,
++      { id: uid(), name: "", score: 5, nat: "NA", pos1: "", pos2: "" },
++    ]);
++  }
++
++  function removePlayer(id) {
++    setPlayers((prev) => prev.filter((player) => player.id !== id));
++  }
++
++  function handlePaste() {
++    const parsed = parseListIgnoreNumbers(pasteText);
++    if (!appendMode) {
++      setPlayers(parsed);
++    } else {
++      setPlayers((prev) => [...prev, ...parsed]);
++    }
++    setPasteText("");
++  }
++
++  function clearAll() {
++    setPlayers([]);
++    setLockedTeam(null);
++  }
++
++  function toggleLockTeam(teamIndex) {
++    setLockedTeam((prev) => {
++      if (!prev || prev.index !== teamIndex) {
++        const members = result.teams[teamIndex]?.members.map((member) => member.id) || [];
++        return { index: teamIndex, members };
++      }
++      return null;
++    });
++  }
++
++  function copyTeams() {
++    const text = buildClipboardTeams(result.teams);
++    if (navigator?.clipboard) {
++      navigator.clipboard.writeText(text).catch(() => {
++        alert("Copy failed. Please copy manually.");
++      });
++    } else {
++      alert("Clipboard access unavailable. Please copy manually.");
++    }
++  }
++
++  return html`
++    <div class="space-y-6">
++      <section class="bg-white shadow rounded-lg p-6">
++        <h1 class="text-2xl font-semibold text-gray-900 mb-4">Balanced Team Builder</h1>
++        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
++          <label class="flex flex-col text-sm text-gray-700">
++            Number of teams
++            <input
++              type="number"
++              min="1"
++              value=${numTeams}
++              onChange=${(event) => setNumTeams(Number(event.target.value) || 0)}
++              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++            />
++          </label>
++          <label class="flex flex-col text-sm text-gray-700">
++            Team size
++            <input
++              type="number"
++              min="1"
++              value=${teamSize}
++              onChange=${(event) => setTeamSize(Number(event.target.value) || 0)}
++              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++            />
++          </label>
++          <label class="flex flex-col text-sm text-gray-700">
++            Shuffle seed (optional)
++            <input
++              type="text"
++              value=${seed}
++              onChange=${(event) => setSeed(event.target.value)}
++              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++            />
++          </label>
++          <label class="flex flex-col text-sm text-gray-700">
++            Same nationality weight
++            <input
++              type="number"
++              step="0.1"
++              value=${sameNatWeight}
++              onChange=${(event) => setSameNatWeight(Number(event.target.value) || 0)}
++              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++            />
++          </label>
++          <label class="flex flex-col text-sm text-gray-700">
++            Position weight
++            <input
++              type="number"
++              step="0.1"
++              value=${posWeight}
++              onChange=${(event) => setPosWeight(Number(event.target.value) || 0)}
++              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++            />
++          </label>
++          <label class="flex flex-col text-sm text-gray-700">
++            Score weight
++            <input
++              type="number"
++              step="0.1"
++              value=${scoreWeight}
++              onChange=${(event) => setScoreWeight(Number(event.target.value) || 0)}
++              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++            />
++          </label>
++        </div>
++        <div class="mt-4 flex flex-wrap gap-3">
++          <button
++            onClick=${addPlayer}
++            class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
++          >
++            Add player
++          </button>
++          <button
++            onClick=${copyTeams}
++            class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
++          >
++            Copy teams
++          </button>
++          <button
++            onClick=${clearAll}
++            class="px-4 py-2 bg-gray-100 text-gray-900 rounded hover:bg-gray-200"
++          >
++            Clear all
++          </button>
++        </div>
++      </section>
++
++      <section class="bg-white shadow rounded-lg p-6">
++        <h2 class="text-xl font-semibold text-gray-900 mb-4">Bulk import</h2>
++        <p class="text-sm text-gray-600 mb-4">
++          Paste a list of players (optionally with ratings) to quickly populate the table.
++        </p>
++        <textarea
++          value=${pasteText}
++          onChange=${(event) => setPasteText(event.target.value)}
++          rows="4"
++          class="w-full rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++          placeholder=${"Example:\n8.5 John Doe\nCarlos\n7.1 - Jane Smith"}
++        ></textarea>
++        <div class="flex items-center justify-between mt-3">
++          <label class="flex items-center text-sm text-gray-700">
++            <input
++              type="checkbox"
++              checked=${appendMode}
++              onChange=${(event) => setAppendMode(event.target.checked)}
++              class="h-4 w-4 text-indigo-600 border-gray-300 rounded"
++            />
++            <span class="ml-2">Append to existing list</span>
++          </label>
++          <button
++            onClick=${handlePaste}
++            class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
++          >
++            Parse and add players
++          </button>
++        </div>
++      </section>
++
++      <section class="bg-white shadow rounded-lg p-6 overflow-x-auto">
++        <h2 class="text-xl font-semibold text-gray-900 mb-4">Players</h2>
++        <table class="min-w-full divide-y divide-gray-200">
++          <thead class="bg-gray-50">
++            <tr>
++              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
++              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
++              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nat</th>
++              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Primary position</th>
++              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Secondary position</th>
++              <th class="px-3 py-2"></th>
++            </tr>
++          </thead>
++          <tbody class="bg-white divide-y divide-gray-200">
++            ${players.map(
++              (player) => html`
++                <tr key=${player.id}>
++                  <td class="px-3 py-2 whitespace-nowrap">
++                    <input
++                      type="text"
++                      value=${player.name}
++                      onChange=${(event) => updatePlayer(player.id, "name", event.target.value)}
++                      class="w-full rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++                    />
++                  </td>
++                  <td class="px-3 py-2 whitespace-nowrap">
++                    <input
++                      type="number"
++                      value=${player.score}
++                      onChange=${(event) => updatePlayer(player.id, "score", event.target.value)}
++                      class="w-24 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++                    />
++                  </td>
++                  <td class="px-3 py-2 whitespace-nowrap">
++                    <input
++                      type="text"
++                      value=${player.nat}
++                      onChange=${(event) =>
++                        updatePlayer(player.id, "nat", event.target.value.toUpperCase())
++                      }
++                      class="w-20 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 text-center"
++                      maxLength="3"
++                    />
++                  </td>
++                  <td class="px-3 py-2 whitespace-nowrap">
++                    <input
++                      type="text"
++                      value=${player.pos1}
++                      onChange=${(event) => updatePlayer(player.id, "pos1", event.target.value)}
++                      class="w-28 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++                    />
++                  </td>
++                  <td class="px-3 py-2 whitespace-nowrap">
++                    <input
++                      type="text"
++                      value=${player.pos2}
++                      onChange=${(event) => updatePlayer(player.id, "pos2", event.target.value)}
++                      class="w-28 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
++                    />
++                  </td>
++                  <td class="px-3 py-2 text-right whitespace-nowrap">
++                    <button
++                      onClick=${() => removePlayer(player.id)}
++                      class="px-3 py-1 text-sm text-red-600 hover:text-red-800"
++                    >
++                      Remove
++                    </button>
++                  </td>
++                </tr>
++              `
++            )}
++          </tbody>
++        </table>
++        ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">No players added yet.</p>`}
++      </section>
++
++      <section class="bg-white shadow rounded-lg p-6">
++        <div class="flex items-center justify-between">
++          <h2 class="text-xl font-semibold text-gray-900">Teams</h2>
++          <button
++            onClick=${() => setPlayers(normalizePlayers(players))}
++            class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
++          >
++            Clean inputs
++          </button>
++        </div>
++        ${result.error && html`<p class="text-sm text-red-600 mt-3">${result.error}</p>`}
++        ${!result.error && html`
++          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
++            ${result.teams.map((team, index) => {
++              const isLocked = lockedTeam && lockedTeam.index === index;
++              return html`
++                <div key=${team.name} class="border border-gray-200 rounded-lg p-4">
++                  <div class="flex items-start justify-between">
++                    <div>
++                      <h3 class="text-lg font-semibold text-gray-900">${team.name}</h3>
++                      <p class="text-sm text-gray-500">Score: ${team.score.toFixed(1)}</p>
++                    </div>
++                    <button
++                      onClick=${() => toggleLockTeam(index)}
++                      class=${`px-3 py-1 text-xs font-medium rounded ${
++                        isLocked ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700"
++                      }`}
++                    >
++                      ${isLocked ? "Unlock" : "Lock"}
++                    </button>
++                  </div>
++                  <ul class="mt-3 space-y-2">
++                    ${team.members.map(
++                      (member) => html`
++                        <li key=${member.id} class="text-sm text-gray-800">
++                          <span class="font-medium">${member.name}</span>
++                          ${member.pos1 && html`<span class="text-gray-500"> — ${member.pos1}</span>`}
++                          <span class="ml-2 text-gray-500">(${member.score})</span>
++                        </li>
++                      `
++                    )}
++                  </ul>
++                  ${team.members.length === 0 && html`
++                    <p class="text-sm text-gray-500 mt-2">No players assigned.</p>
++                  `}
++                </div>
++              `;
++            })}
++          </div>
++        `}
++      </section>
++
++      ${!result.error && result.bench.length > 0 && html`
++        <section class="bg-white shadow rounded-lg p-6">
++          <h2 class="text-xl font-semibold text-gray-900 mb-3">Bench</h2>
++          <ul class="space-y-2">
++            ${result.bench.map(
++              (player) => html`
++                <li key=${player.id} class="text-sm text-gray-700">
++                  <span class="font-medium">${player.name}</span>
++                  <span class="ml-2 text-gray-500">(${player.score})</span>
++                </li>
++              `
++            )}
++          </ul>
++        </section>
++      `}
++    </div>
++  `;
++}
++
++const rootElement = document.getElementById("root");
++if (rootElement) {
++  ReactDOM.createRoot(rootElement).render(html`<${App} />`);
++}
++
++export { App };
+diff --git a/index.html b/index.html
+index c969f9d768c5227c2e03a59fbaff0aead3a2a864..f417b25621f84b66099cbefb6daf3d0b54495d02 100644
+--- a/index.html
++++ b/index.html
+@@ -1,58 +1,83 @@
+ <!doctype html>
+ <html lang="en">
+ <head>
+   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4302211522212062"
+      crossorigin="anonymous"></script>
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1" />
+   <title>Balanced Team Builder</title>
+ 
+   <!-- Google Analytics -->
+   <script async src="https://www.googletagmanager.com/gtag/js?id=G-ABCDE12345"></script>
+   <script>
+     window.dataLayer = window.dataLayer || [];
+     function gtag(){dataLayer.push(arguments);}
+     gtag('js', new Date());
+     gtag('config', 'G-ABCDE12345');
+   </script>
+ 
+   <!-- Google AdSense Non-Personalized -->
+   <script async
+     src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1234567890"
+     data-npa="1"
+     crossorigin="anonymous"></script>
+ 
+-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+-  <script src="https://cdn.tailwindcss.com"></script>
++  <style>
++    body { margin: 0; background: #f9fafb; font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
++    .ad-wrapper { width: 100%; display: flex; justify-content: center; padding: 1.5rem 0; }
++    .app-shell { min-height: 100vh; }
++    iframe { width: 100%; border: none; min-height: 1200px; }
++  </style>
+ </head>
+ 
+-<body class="bg-gray-50">
++<body>
+   <!-- Top Ad -->
+-  <div class="w-full flex justify-center py-4">
++  <div class="ad-wrapper">
+     <ins class="adsbygoogle"
+          style="display:block"
+          data-ad-client="ca-pub-1234567890"
+          data-ad-slot="TOP_SLOT_ID"
+          data-ad-format="auto"
+          data-full-width-responsive="true"></ins>
+     <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+   </div>
+ 
+-  <div id="root" class="min-h-screen">
+-    <iframe src="app.html" width="100%" height="1000" style="border:none;"></iframe>
++  <div class="app-shell">
++    <iframe id="app-frame" src="app.html" title="Balanced Team Builder"></iframe>
+   </div>
+ 
+   <!-- Bottom Ad -->
+-  <div class="w-full flex justify-center py-4">
++  <div class="ad-wrapper">
+     <ins class="adsbygoogle"
+          style="display:block"
+          data-ad-client="ca-pub-1234567890"
+          data-ad-slot="BOTTOM_SLOT_ID"
+          data-ad-format="auto"
+          data-full-width-responsive="true"></ins>
+     <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+   </div>
++
++  <script>
++    const frame = document.getElementById('app-frame');
++    function adjustFrameHeight() {
++      if (!frame || !frame.contentWindow) return;
++      try {
++        const doc = frame.contentWindow.document;
++        const height = Math.max(doc.body.scrollHeight, doc.documentElement.scrollHeight);
++        frame.style.height = (height || 1200) + 'px';
++      } catch (err) {
++        console.warn('Unable to resize iframe:', err);
++      }
++    }
++    if (frame) {
++      frame.addEventListener('load', () => {
++        adjustFrameHeight();
++        frame.contentWindow.addEventListener('resize', adjustFrameHeight);
++        setTimeout(adjustFrameHeight, 500);
++      });
++      window.addEventListener('resize', adjustFrameHeight);
++      setInterval(adjustFrameHeight, 2000);
++    }
++  </script>
+ </body>
+ </html>
+diff --git a/logic.js b/logic.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..f037dd105946119b319ad099cab95e75b27b43a8
+--- /dev/null
++++ b/logic.js
+@@ -0,0 +1,278 @@
++const RANDOM_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
++
++export function uid(length = 7) {
++  let out = "";
++  for (let i = 0; i < length; i += 1) {
++    out += RANDOM_CHARS[Math.floor(Math.random() * RANDOM_CHARS.length)];
++  }
++  return out;
++}
++
++export function seededShuffle(arr, seed) {
++  if (!seed) return [...arr];
++  let s = 0;
++  for (let i = 0; i < seed.length; i += 1) {
++    s = (s * 31 + seed.charCodeAt(i)) >>> 0;
++  }
++  function rand() {
++    s = (1664525 * s + 1013904223) >>> 0;
++    return s / 2 ** 32;
++  }
++  const copy = [...arr];
++  for (let i = copy.length - 1; i > 0; i -= 1) {
++    const j = Math.floor(rand() * (i + 1));
++    [copy[i], copy[j]] = [copy[j], copy[i]];
++  }
++  return copy;
++}
++
++export function parseListIgnoreNumbers(text) {
++  const lines = text.split(/\r?\n/);
++  const out = [];
++  for (const raw of lines) {
++    const line = raw.trim();
++    if (!line) continue;
++    let name = line
++      .replace(/^\s*\d+(?:[.,]\d+)?\s*(?:[-,:\t ]+)?\s*/i, "")
++      .trim();
++    name = name.replace(/\./g, "").trim();
++    if (!name) continue;
++    if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(name)) continue;
++    out.push({ id: uid(), name, score: 5, nat: "NA", pos1: "", pos2: "" });
++  }
++  return out;
++}
++
++export function buildClipboardTeams(teams) {
++  const lines = [];
++  (teams || []).forEach((team, idx) => {
++    const label = team?.name ? String(team.name) : `Team ${idx + 1}`;
++    lines.push(label);
++    const members = team?.members || [];
++    const hasAnyPos = members.some(
++      (m) => (m.pos1 && m.pos1.trim()) || (m.pos2 && m.pos2.trim())
++    );
++    if (hasAnyPos) {
++      lines.push("Name,Pos");
++      members.forEach((member) => {
++        const pos = member.pos1 ? member.pos1.trim() : "";
++        if (pos) {
++          lines.push(`${member.name},${pos}`);
++        } else {
++          lines.push(member.name);
++        }
++      });
++    } else {
++      lines.push("Name");
++      members.forEach((member) => {
++        lines.push(member.name);
++      });
++    }
++    lines.push("");
++  });
++  return lines.join("\n");
++}
++
++export function normalizePlayers(rows) {
++  return (rows || [])
++    .map((row) => {
++      const nat = (row.nat || "").trim();
++      return {
++        ...row,
++        name: (row.name || "").trim(),
++        nat: nat || "NA",
++        pos1: (row.pos1 || "").trim(),
++        pos2: (row.pos2 || "").trim(),
++        score: Number.isFinite(Number(row.score)) ? Number(row.score) : 5,
++      };
++    })
++    .filter((row) => row.name);
++}
++
++function collectPositions(rows) {
++  const set = new Set();
++  rows.forEach((row) => {
++    if (row.pos1) set.add(row.pos1);
++    if (row.pos2) set.add(row.pos2);
++  });
++  return Array.from(set).sort();
++}
++
++function emptyResult(message) {
++  return {
++    error: message,
++    teams: [],
++    targets: [],
++    allPos: [],
++    bench: [],
++    used: 0,
++  };
++}
++
++export function computeAssignments(players, options = {}, lockedTeam = null) {
++  const {
++    numTeams = 0,
++    teamSize = 0,
++    seed = "",
++    sameNatWeight = 1,
++    posWeight = 2,
++    scoreWeight = 1,
++  } = options;
++
++  if (numTeams < 1 || teamSize < 1) {
++    return emptyResult("Set teams and size.");
++  }
++
++  const rows = normalizePlayers(players);
++  const needed = numTeams * teamSize;
++  if (rows.length < needed) {
++    return emptyResult(`Need ${needed} players, have ${rows.length}.`);
++  }
++
++  const orderedAll = seededShuffle(
++    [...rows].sort(
++      (a, b) => b.score - a.score || a.name.localeCompare(b.name)
++    ),
++    seed
++  );
++  const pool = orderedAll.slice(0, needed);
++  const bench = orderedAll.slice(needed);
++
++  const allPos = collectPositions(pool);
++  const posCounts = Object.fromEntries(allPos.map((pos) => [pos, 0]));
++  pool.forEach((player) => {
++    if (player.pos1) posCounts[player.pos1] = (posCounts[player.pos1] || 0) + 1;
++  });
++
++  const targets = Array.from({ length: numTeams }, () => ({}));
++  for (const pos of allPos) {
++    const total = posCounts[pos] || 0;
++    const base = Math.floor(total / numTeams);
++    let remainder = total % numTeams;
++    for (let teamIndex = 0; teamIndex < numTeams; teamIndex += 1) {
++      targets[teamIndex][pos] = base + (teamIndex < remainder ? 1 : 0);
++    }
++  }
++
++  const teams = Array.from({ length: numTeams }, (_, index) => ({
++    name: `Team ${index + 1}`,
++    members: [],
++    score: 0,
++    pos: {},
++    nat: {},
++    index,
++  }));
++
++  const avgScore = pool.reduce((sum, player) => sum + player.score, 0) / numTeams;
++
++  const activeLock =
++    lockedTeam && Number.isInteger(lockedTeam.index) && lockedTeam.index < numTeams
++      ? lockedTeam
++      : null;
++
++  const lockedMembers = activeLock
++    ? activeLock.members
++        .map((id) => pool.find((player) => player.id === id))
++        .filter(Boolean)
++    : [];
++
++  const lockedMap = new Map(lockedMembers.map((player) => [player.id, true]));
++
++  lockedMembers.forEach((member) => {
++    const team = teams[activeLock.index];
++    team.members.push(member);
++    team.score += member.score;
++    if (member.pos1) {
++      team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
++    }
++    if (member.nat) {
++      team.nat[member.nat] = (team.nat[member.nat] || 0) + 1;
++    }
++  });
++
++  const remaining = pool.filter((player) => !lockedMap.has(player.id));
++
++  function penalty(team, candidate) {
++    let total = 0;
++    const natCount = team.nat[candidate.nat] || 0;
++    total += natCount * sameNatWeight;
++
++    const targetCount = targets[team.index]?.[candidate.pos1] || 0;
++    const current = targetCount
++      ? (team.pos[candidate.pos1] || 0) / Math.max(1, targetCount)
++      : 0;
++    total += current * posWeight;
++
++    const projected =
++      (team.score + candidate.score) / Math.max(1, team.members.length + 1);
++    total += Math.abs(projected - avgScore) * scoreWeight;
++
++    return total;
++  }
++
++  const teamOrder = teams.map((team, idx) => ({ team, idx }));
++
++  remaining.forEach((candidate) => {
++    teamOrder.sort(
++      (a, b) => a.team.members.length - b.team.members.length || a.idx - b.idx
++    );
++    let best = teamOrder[0];
++    let bestPenalty = Infinity;
++    teamOrder.forEach(({ team, idx }) => {
++      team.index = idx;
++      const pen = penalty(team, candidate);
++      if (pen < bestPenalty) {
++        bestPenalty = pen;
++        best = { team, idx };
++      }
++    });
++    const targetTeam = best.team;
++    targetTeam.members.push(candidate);
++    targetTeam.score += candidate.score;
++    if (candidate.pos1) {
++      targetTeam.pos[candidate.pos1] =
++        (targetTeam.pos[candidate.pos1] || 0) + 1;
++    }
++    if (candidate.nat) {
++      targetTeam.nat[candidate.nat] =
++        (targetTeam.nat[candidate.nat] || 0) + 1;
++    }
++  });
++
++  return {
++    error: null,
++    teams: teams.map(({ index, ...rest }) => rest),
++    targets,
++    allPos,
++    bench,
++    used: pool.length,
++  };
++}
++
++if (typeof console !== "undefined") {
++  const parsed = parseListIgnoreNumbers(
++    "12. Luis Miguel\n7.5 - Jane Smith.\n...\n  33 Carlos"
++  );
++  console.assert(parsed.length === 3, "parseListIgnoreNumbers keeps 3 valid names");
++  console.assert(parsed[0].name === "Luis Miguel", "First name cleaned");
++
++  const shuffled = seededShuffle([1, 2, 3, 4], "x");
++  console.assert(Array.isArray(shuffled) && shuffled.length === 4, "seededShuffle returns array");
++
++  const clip = buildClipboardTeams([
++    { name: "Team 1", members: [{ name: "A", pos1: "D" }, { name: "B", pos1: "M" }] },
++    { name: "Team 2", members: [{ name: "C", pos1: "F" }] },
++  ]);
++  console.assert(
++    clip.includes("Team 1") && clip.includes("Name,Pos") && clip.includes("A,D"),
++    "Clipboard base format ok"
++  );
++
++  const clipNoPos = buildClipboardTeams([
++    { name: "Team 3", members: [{ name: "X", pos1: "" }, { name: "Y", pos1: "" }] },
++  ]);
++  console.assert(
++    clipNoPos.includes("Team 3") && clipNoPos.includes("Name\nX\nY"),
++    "Clipboard no-pos format ok"
++  );
++}
+diff --git a/package.json b/package.json
+new file mode 100644
+index 0000000000000000000000000000000000000000..a156eba05d00b984f3407786188d99e0728e064e
+--- /dev/null
++++ b/package.json
+@@ -0,0 +1,9 @@
++{
++  "name": "futbol-domingos",
++  "version": "1.0.0",
++  "private": true,
++  "type": "module",
++  "scripts": {
++    "test": "node --test"
++  }
++}
+diff --git a/tests/logic.test.js b/tests/logic.test.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..43ae0fdfcf2b9f657b5966c8e89367cb73181461
+--- /dev/null
++++ b/tests/logic.test.js
+@@ -0,0 +1,81 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import {
++  uid,
++  parseListIgnoreNumbers,
++  buildClipboardTeams,
++  computeAssignments,
++} from "../logic.js";
++
++function samplePlayers(count) {
++  const positions = ["GK", "DF", "MF", "FW"];
++  const nations = ["US", "ES", "BR", "FR"];
++  return Array.from({ length: count }, (_, index) => ({
++    id: uid(),
++    name: `Player ${index + 1}`,
++    score: 4 + (index % 5),
++    nat: nations[index % nations.length],
++    pos1: positions[index % positions.length],
++    pos2: "",
++  }));
++}
++
++test("parseListIgnoreNumbers removes numeric prefixes", () => {
++  const input = "12. Luis Miguel\n7.5 - Jane Smith.\n  33 Carlos\n\n-- invalid";
++  const players = parseListIgnoreNumbers(input);
++  assert(players.length >= 3);
++  assert.equal(players[0].name, "Luis Miguel");
++  assert.equal(players[1].name, "Jane Smith");
++  assert.equal(players[2].name, "Carlos");
++});
++
++test("buildClipboardTeams outputs CSV style rows", () => {
++  const teams = [
++    {
++      name: "Team 1",
++      members: [
++        { id: "a", name: "Alice", pos1: "MF" },
++        { id: "b", name: "Bob", pos1: "DF" },
++      ],
++    },
++  ];
++  const text = buildClipboardTeams(teams);
++  assert.match(text, /Team 1/);
++  assert.match(text, /Name,Pos/);
++  assert.match(text, /Alice,MF/);
++});
++
++test("computeAssignments creates balanced teams and bench", () => {
++  const players = samplePlayers(14);
++  const result = computeAssignments(players, {
++    numTeams: 3,
++    teamSize: 4,
++    seed: "demo",
++    sameNatWeight: 1,
++    posWeight: 1,
++    scoreWeight: 1,
++  });
++  assert.equal(result.error, null);
++  assert.equal(result.teams.length, 3);
++  result.teams.forEach((team) => {
++    assert.equal(team.members.length, 4);
++  });
++  assert.equal(result.bench.length, 2);
++});
++
++test("computeAssignments respects locked team members", () => {
++  const players = samplePlayers(8);
++  const locked = { index: 0, members: [players[0].id, players[1].id] };
++  const result = computeAssignments(players, {
++    numTeams: 2,
++    teamSize: 4,
++    seed: "lock",
++    sameNatWeight: 1,
++    posWeight: 1,
++    scoreWeight: 1,
++  }, locked);
++  assert.equal(result.error, null);
++  const teamOneIds = result.teams[0].members.map((member) => member.id);
++  assert(teamOneIds.includes(players[0].id));
++  assert(teamOneIds.includes(players[1].id));
++});
