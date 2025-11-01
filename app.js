@@ -13,7 +13,7 @@ function App() {
   const [players, setPlayers] = useState([]);
   const [numTeams, setNumTeams] = useState(2);
   const [teamSize, setTeamSize] = useState(5);
-  const [seed, setSeed] = useState("");
+  const [shuffleSeed, setShuffleSeed] = useState(() => uid());
   const [sameNatWeight, setSameNatWeight] = useState(1.0);
   const [posWeight, setPosWeight] = useState(2.0);
   const [scoreWeight, setScoreWeight] = useState(1.0);
@@ -26,12 +26,12 @@ function App() {
       computeAssignments(players, {
         numTeams,
         teamSize,
-        seed,
+        seed: shuffleSeed,
         sameNatWeight,
         posWeight,
         scoreWeight,
       }, lockedTeam),
-    [players, numTeams, teamSize, seed, sameNatWeight, posWeight, scoreWeight, lockedTeam]
+    [players, numTeams, teamSize, shuffleSeed, sameNatWeight, posWeight, scoreWeight, lockedTeam]
   );
 
   function updatePlayer(id, field, value) {
@@ -41,7 +41,7 @@ function App() {
   function addPlayer() {
     setPlayers((prev) => [
       ...prev,
-      { id: uid(), name: "", score: 5, nat: "NA", pos1: "", pos2: "" },
+      { id: uid(), name: "", score: 5, nat: "NA", pos1: "" },
     ]);
   }
 
@@ -62,6 +62,10 @@ function App() {
   function clearAll() {
     setPlayers([]);
     setLockedTeam(null);
+  }
+
+  function reshuffleTeams() {
+    setShuffleSeed(uid());
   }
 
   function toggleLockTeam(teamIndex) {
@@ -111,15 +115,6 @@ function App() {
             />
           </label>
           <label class="flex flex-col text-sm text-gray-700">
-            Shuffle seed (optional)
-            <input
-              type="text"
-              value=${seed}
-              onChange=${(event) => setSeed(event.target.value)}
-              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-            />
-          </label>
-          <label class="flex flex-col text-sm text-gray-700">
             Same nationality weight
             <input
               type="number"
@@ -156,12 +151,6 @@ function App() {
             class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
           >
             Add player
-          </button>
-          <button
-            onClick=${copyTeams}
-            class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-          >
-            Copy teams
           </button>
           <button
             onClick=${clearAll}
@@ -212,7 +201,6 @@ function App() {
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nat</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Primary position</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Secondary position</th>
               <th class="px-3 py-2"></th>
             </tr>
           </thead>
@@ -220,12 +208,12 @@ function App() {
             ${players.map(
               (player) => html`
                 <tr key=${player.id}>
-                  <td class="px-3 py-2 whitespace-nowrap">
+                  <td class="px-3 py-2">
                     <input
                       type="text"
                       value=${player.name}
                       onChange=${(event) => updatePlayer(player.id, "name", event.target.value)}
-                      class="w-full rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                      class="w-full min-w-[12rem] rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
                   <td class="px-3 py-2 whitespace-nowrap">
@@ -255,14 +243,6 @@ function App() {
                       class="w-28 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
-                  <td class="px-3 py-2 whitespace-nowrap">
-                    <input
-                      type="text"
-                      value=${player.pos2}
-                      onChange=${(event) => updatePlayer(player.id, "pos2", event.target.value)}
-                      class="w-28 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-                    />
-                  </td>
                   <td class="px-3 py-2 text-right whitespace-nowrap">
                     <button
                       onClick=${() => removePlayer(player.id)}
@@ -277,6 +257,16 @@ function App() {
           </tbody>
         </table>
         ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">No players added yet.</p>`}
+        ${players.length > 0 && html`
+          <div class="mt-4 flex justify-end">
+            <button
+              onClick=${reshuffleTeams}
+              class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+            >
+              Shuffle teams
+            </button>
+          </div>
+        `}
       </section>
 
       <section class="bg-white shadow rounded-lg p-6">
@@ -311,11 +301,11 @@ function App() {
                     </button>
                   </div>
                   <ul class="mt-3 space-y-2">
-                    ${team.members.map(
-                      (member) => html`
-                        <li key=${member.id} class="text-sm text-gray-800">
-                          <span class="font-medium">${member.name}</span>
-                          ${member.pos1 && html`<span class="text-gray-500"> — ${member.pos1}</span>`}
+                  ${team.members.map(
+                    (member) => html`
+                      <li key=${member.id} class="text-sm text-gray-800">
+                        <span class="font-medium">${member.name}</span>
+                        ${member.pos1 && html`<span class="text-gray-500"> — ${member.pos1}</span>`}
                           <span class="ml-2 text-gray-500">(${member.score})</span>
                         </li>
                       `
@@ -328,24 +318,49 @@ function App() {
               `;
             })}
           </div>
+          <div class="mt-6 flex justify-end">
+            <button
+              onClick=${copyTeams}
+              class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              Copy teams
+            </button>
+          </div>
         `}
       </section>
 
-      ${!result.error && result.bench.length > 0 && html`
-        <section class="bg-white shadow rounded-lg p-6">
-          <h2 class="text-xl font-semibold text-gray-900 mb-3">Bench</h2>
-          <ul class="space-y-2">
-            ${result.bench.map(
-              (player) => html`
-                <li key=${player.id} class="text-sm text-gray-700">
-                  <span class="font-medium">${player.name}</span>
-                  <span class="ml-2 text-gray-500">(${player.score})</span>
-                </li>
-              `
-            )}
-          </ul>
-        </section>
-      `}
+      ${
+        !result.error &&
+        result.subs.some((group) => group.players.length > 0) &&
+        html`
+          <section class="bg-white shadow rounded-lg p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-3">Subs</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              ${result.subs.map(
+                (group) => html`
+                  <div class="border border-gray-200 rounded-lg p-4">
+                    <h3 class="text-lg font-semibold text-gray-900">Subs for ${group.teamName}</h3>
+                    ${group.players.length === 0
+                      ? html`<p class="text-sm text-gray-500 mt-2">No subs assigned.</p>`
+                      : html`
+                          <ul class="mt-3 space-y-2">
+                            ${group.players.map(
+                              (player) => html`
+                                <li key=${player.id} class="text-sm text-gray-700">
+                                  <span class="font-medium">${player.name}</span>
+                                  <span class="ml-2 text-gray-500">(${player.score})</span>
+                                </li>
+                              `
+                            )}
+                          </ul>
+                        `}
+                  </div>
+                `
+              )}
+            </div>
+          </section>
+        `
+      }
     </div>
   `;
 }

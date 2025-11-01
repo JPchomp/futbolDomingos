@@ -38,7 +38,7 @@ export function parseListIgnoreNumbers(text) {
     name = name.replace(/\./g, "").trim();
     if (!name) continue;
     if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(name)) continue;
-    out.push({ id: uid(), name, score: 5, nat: "NA", pos1: "", pos2: "" });
+    out.push({ id: uid(), name, score: 5, nat: "NA", pos1: "" });
   }
   return out;
 }
@@ -49,9 +49,7 @@ export function buildClipboardTeams(teams) {
     const label = team?.name ? String(team.name) : `Team ${idx + 1}`;
     lines.push(label);
     const members = team?.members || [];
-    const hasAnyPos = members.some(
-      (m) => (m.pos1 && m.pos1.trim()) || (m.pos2 && m.pos2.trim())
-    );
+    const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
     if (hasAnyPos) {
       lines.push("Name,Pos");
       members.forEach((member) => {
@@ -82,7 +80,6 @@ export function normalizePlayers(rows) {
         name: (row.name || "").trim(),
         nat: nat || "NA",
         pos1: (row.pos1 || "").trim(),
-        pos2: (row.pos2 || "").trim(),
         score: Number.isFinite(Number(row.score)) ? Number(row.score) : 5,
       };
     })
@@ -93,7 +90,6 @@ function collectPositions(rows) {
   const set = new Set();
   rows.forEach((row) => {
     if (row.pos1) set.add(row.pos1);
-    if (row.pos2) set.add(row.pos2);
   });
   return Array.from(set).sort();
 }
@@ -104,7 +100,7 @@ function emptyResult(message) {
     teams: [],
     targets: [],
     allPos: [],
-    bench: [],
+    subs: [],
     used: 0,
   };
 }
@@ -239,12 +235,33 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     }
   });
 
+  const subs = teams.map((team) => ({
+    teamName: team.name,
+    players: [],
+    score: 0,
+  }));
+
+  bench.forEach((player) => {
+    let targetIndex = 0;
+    let bestScore = Infinity;
+    subs.forEach((group, idx) => {
+      const projected = teams[idx].score + group.score + player.score;
+      if (projected < bestScore) {
+        bestScore = projected;
+        targetIndex = idx;
+      }
+    });
+    const targetGroup = subs[targetIndex];
+    targetGroup.players.push(player);
+    targetGroup.score += player.score;
+  });
+
   return {
     error: null,
     teams: teams.map(({ index, ...rest }) => rest),
     targets,
     allPos,
-    bench,
+    subs,
     used: pool.length,
   };
 }

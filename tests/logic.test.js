@@ -16,7 +16,6 @@ function samplePlayers(count) {
     score: 4 + (index % 5),
     nat: nations[index % nations.length],
     pos1: positions[index % positions.length],
-    pos2: "",
   }));
 }
 
@@ -45,7 +44,7 @@ test("buildClipboardTeams outputs CSV style rows", () => {
   assert.match(text, /Alice,MF/);
 });
 
-test("computeAssignments creates balanced teams and bench", () => {
+test("computeAssignments creates balanced teams and subs", () => {
   const players = samplePlayers(14);
   const result = computeAssignments(players, {
     numTeams: 3,
@@ -60,7 +59,8 @@ test("computeAssignments creates balanced teams and bench", () => {
   result.teams.forEach((team) => {
     assert.equal(team.members.length, 4);
   });
-  assert.equal(result.bench.length, 2);
+  assert.equal(result.subs.reduce((sum, group) => sum + group.players.length, 0), 2);
+  assert.equal(result.subs.length, 3);
 });
 
 test("computeAssignments respects locked team members", () => {
