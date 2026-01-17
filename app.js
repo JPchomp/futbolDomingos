@@ -14,11 +14,9 @@ function App() {
   const [numTeams, setNumTeams] = useState(2);
   const [teamSize, setTeamSize] = useState(5);
   const [shuffleSeed, setShuffleSeed] = useState(() => uid());
-  const [sameNatWeight, setSameNatWeight] = useState(1.0);
   const [posWeight, setPosWeight] = useState(2.0);
   const [scoreWeight, setScoreWeight] = useState(1.0);
   const [pasteText, setPasteText] = useState("");
-  const [appendMode, setAppendMode] = useState(false);
   const [lockedTeam, setLockedTeam] = useState(null);
 
   const result = useMemo(
@@ -27,22 +25,14 @@ function App() {
         numTeams: numTeams || 0,
         teamSize: teamSize || 0,
         seed: shuffleSeed,
-        sameNatWeight: sameNatWeight || 0,
         posWeight: posWeight || 0,
         scoreWeight: scoreWeight || 0,
       }, lockedTeam),
-    [players, numTeams, teamSize, shuffleSeed, sameNatWeight, posWeight, scoreWeight, lockedTeam]
+    [players, numTeams, teamSize, shuffleSeed, posWeight, scoreWeight, lockedTeam]
   );
 
   function updatePlayer(id, field, value) {
     setPlayers((prev) => prev.map((player) => (player.id === id ? { ...player, [field]: value } : player)));
-  }
-
-  function addPlayer() {
-    setPlayers((prev) => [
-      ...prev,
-      { id: uid(), name: "", score: 5, nat: "NA", pos1: "" },
-    ]);
   }
 
   function removePlayer(id) {
@@ -51,17 +41,8 @@ function App() {
 
   function handlePaste() {
     const parsed = parseListIgnoreNumbers(pasteText);
-    if (!appendMode) {
-      setPlayers(parsed);
-    } else {
-      setPlayers((prev) => [...prev, ...parsed]);
-    }
+    setPlayers((prev) => [...prev, ...parsed]);
     setPasteText("");
-  }
-
-  function clearAll() {
-    setPlayers([]);
-    setLockedTeam(null);
   }
 
   function reshuffleTeams() {
@@ -115,17 +96,7 @@ function App() {
             />
           </label>
           <label class="flex flex-col text-sm text-gray-700">
-            Same nationality weight
-            <input
-              type="number"
-              step="0.1"
-              value=${sameNatWeight}
-              onChange=${(event) => setSameNatWeight(event.target.value === "" ? "" : Number(event.target.value))}
-              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-            />
-          </label>
-          <label class="flex flex-col text-sm text-gray-700">
-            Position weight
+            Position importance
             <input
               type="number"
               step="0.1"
@@ -135,7 +106,7 @@ function App() {
             />
           </label>
           <label class="flex flex-col text-sm text-gray-700">
-            Score weight
+            Score importance
             <input
               type="number"
               step="0.1"
@@ -144,20 +115,6 @@ function App() {
               class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
             />
           </label>
-        </div>
-        <div class="mt-4 flex flex-wrap gap-3">
-          <button
-            onClick=${addPlayer}
-            class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-          >
-            Add player
-          </button>
-          <button
-            onClick=${clearAll}
-            class="px-4 py-2 bg-gray-100 text-gray-900 rounded hover:bg-gray-200"
-          >
-            Clear all
-          </button>
         </div>
       </section>
 
@@ -173,21 +130,12 @@ function App() {
           class="w-full rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
           placeholder=${"Example:\n8.5 John Doe\nCarlos\n7.1 - Jane Smith"}
         ></textarea>
-        <div class="flex items-center justify-between mt-3">
-          <label class="flex items-center text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked=${appendMode}
-              onChange=${(event) => setAppendMode(event.target.checked)}
-              class="h-4 w-4 text-indigo-600 border-gray-300 rounded"
-            />
-            <span class="ml-2">Append to existing list</span>
-          </label>
+        <div class="flex justify-end mt-3">
           <button
             onClick=${handlePaste}
             class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
           >
-            Parse and add players
+            Add players
           </button>
         </div>
       </section>
@@ -199,7 +147,6 @@ function App() {
             <tr>
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nat</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pos.</th>
               <th class="px-3 py-2"></th>
             </tr>
@@ -222,17 +169,6 @@ function App() {
                       value=${player.score}
                       onChange=${(event) => updatePlayer(player.id, "score", event.target.value === "" ? "" : Number(event.target.value))}
                       class="w-16 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-                    />
-                  </td>
-                  <td class="px-3 py-2 whitespace-nowrap">
-                    <input
-                      type="text"
-                      value=${player.nat}
-                      onChange=${(event) =>
-                        updatePlayer(player.id, "nat", event.target.value.toUpperCase())
-                      }
-                      class="w-12 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 text-center"
-                      maxLength="3"
                     />
                   </td>
                   <td class="px-3 py-2 whitespace-nowrap">

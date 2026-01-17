@@ -9,12 +9,10 @@ import {
 
 function samplePlayers(count) {
   const positions = ["GK", "DF", "MF", "FW"];
-  const nations = ["US", "ES", "BR", "FR"];
   return Array.from({ length: count }, (_, index) => ({
     id: uid(),
     name: `Player ${index + 1}`,
     score: 4 + (index % 5),
-    nat: nations[index % nations.length],
     pos1: positions[index % positions.length],
   }));
 }
@@ -26,6 +24,20 @@ test("parseListIgnoreNumbers removes numeric prefixes", () => {
   assert.equal(players[0].name, "Luis Miguel");
   assert.equal(players[1].name, "Jane Smith");
   assert.equal(players[2].name, "Carlos");
+});
+
+test("parseListIgnoreNumbers extracts ratings as scores", () => {
+  const input = "8.5 John Doe\n7.1 - Jane Smith\nCarlos\n9,2 Maria";
+  const players = parseListIgnoreNumbers(input);
+  assert.equal(players.length, 4);
+  assert.equal(players[0].name, "John Doe");
+  assert.equal(players[0].score, 8.5);
+  assert.equal(players[1].name, "Jane Smith");
+  assert.equal(players[1].score, 7.1);
+  assert.equal(players[2].name, "Carlos");
+  assert.equal(players[2].score, 5); // default score
+  assert.equal(players[3].name, "Maria");
+  assert.equal(players[3].score, 9.2); // comma converted to period
 });
 
 test("buildClipboardTeams outputs CSV style rows", () => {
@@ -50,7 +62,6 @@ test("computeAssignments creates balanced teams and subs", () => {
     numTeams: 3,
     teamSize: 4,
     seed: "demo",
-    sameNatWeight: 1,
     posWeight: 1,
     scoreWeight: 1,
   });
@@ -70,7 +81,6 @@ test("computeAssignments respects locked team members", () => {
     numTeams: 2,
     teamSize: 4,
     seed: "lock",
-    sameNatWeight: 1,
     posWeight: 1,
     scoreWeight: 1,
   }, locked);

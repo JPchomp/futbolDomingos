@@ -32,13 +32,26 @@ export function parseListIgnoreNumbers(text) {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    let name = line
-      .replace(/^\s*\d+(?:[.,]\d+)?\s*(?:[-,:\t ]+)?\s*/i, "")
-      .trim();
+    
+    // Match optional rating at the beginning
+    // Pattern: optional whitespace, digits with optional decimal (comma or period), optional separators (-, :, tab, space)
+    const ratingMatch = line.match(/^\s*(\d+(?:[.,]\d+)?)\s*(?:[-,:\t ]+)?\s*/);
+    let score = 5; // default score
+    let name = line;
+    
+    if (ratingMatch) {
+      // Extract the rating and convert comma to period for decimal
+      const ratingStr = ratingMatch[1].replace(',', '.');
+      score = parseFloat(ratingStr);
+      // Remove the rating from the line to get the name
+      name = line.substring(ratingMatch[0].length).trim();
+    }
+    
+    // Remove periods from name
     name = name.replace(/\./g, "").trim();
     if (!name) continue;
     if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(name)) continue;
-    out.push({ id: uid(), name, score: 5, nat: "NA", pos1: "" });
+    out.push({ id: uid(), name, score, pos1: "" });
   }
   return out;
 }
@@ -70,11 +83,9 @@ export function buildClipboardTeams(teams) {
 export function normalizePlayers(rows) {
   return (rows || [])
     .map((row) => {
-      const nat = (row.nat || "").trim();
       return {
         ...row,
         name: (row.name || "").trim(),
-        nat: nat || "NA",
         pos1: (row.pos1 || "").trim(),
         score: Number.isFinite(Number(row.score)) ? Number(row.score) : 5,
       };
@@ -106,7 +117,6 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     numTeams = 0,
     teamSize = 0,
     seed = "",
-    sameNatWeight = 1,
     posWeight = 2,
     scoreWeight = 1,
   } = options;
@@ -151,7 +161,6 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     members: [],
     score: 0,
     pos: {},
-    nat: {},
     index,
   }));
 
@@ -184,17 +193,12 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     if (member.pos1) {
       team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
     }
-    if (member.nat) {
-      team.nat[member.nat] = (team.nat[member.nat] || 0) + 1;
-    }
   });
 
   const remaining = pool.filter((player) => !lockedMap.has(player.id));
 
   function penalty(team, candidate) {
     let total = 0;
-
-    total += (team.nat[candidate.nat] || 0) * sameNatWeight;
 
     const targetCount = targets[team.index]?.[candidate.pos1] || 0;
     const current = targetCount
@@ -238,10 +242,6 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     if (candidate.pos1) {
       targetTeam.pos[candidate.pos1] =
         (targetTeam.pos[candidate.pos1] || 0) + 1;
-    }
-    if (candidate.nat) {
-      targetTeam.nat[candidate.nat] =
-        (targetTeam.nat[candidate.nat] || 0) + 1;
     }
   });
 
