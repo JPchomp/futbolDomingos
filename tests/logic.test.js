@@ -9,12 +9,10 @@ import {
 
 function samplePlayers(count) {
   const positions = ["GK", "DF", "MF", "FW"];
-  const nations = ["US", "ES", "BR", "FR"];
   return Array.from({ length: count }, (_, index) => ({
     id: uid(),
     name: `Player ${index + 1}`,
     score: 4 + (index % 5),
-    nat: nations[index % nations.length],
     pos1: positions[index % positions.length],
   }));
 }

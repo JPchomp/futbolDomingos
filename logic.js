@@ -34,6 +34,7 @@ export function parseListIgnoreNumbers(text) {
     if (!line) continue;
     
     // Match optional rating at the beginning
+    // Pattern: optional whitespace, digits with optional decimal (comma or period), optional separators (-, :, tab, space)
     const ratingMatch = line.match(/^\s*(\d+(?:[.,]\d+)?)\s*(?:[-,:\t ]+)?\s*/);
     let score = 5; // default score
     let name = line;
