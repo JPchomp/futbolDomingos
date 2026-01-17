@@ -35,7 +35,7 @@ export function parseListIgnoreNumbers(text) {
     
     // Match optional list number at the beginning (to be discarded)
     // Pattern: optional whitespace, digits (no decimal), optional separators (., -, :, tab, space)
-    const listNumberMatch = line.match(/^\s*(\d+)\s*[.\-:\t ]+\s*/);
+    const listNumberMatch = line.match(/^\s*(\d+)\s*[.\-:\t ]*\s*/);
     let remainingLine = line;
     
     if (listNumberMatch) {
@@ -44,8 +44,8 @@ export function parseListIgnoreNumbers(text) {
     }
     
     // Now try to extract score from the END of the line
-    // Pattern: whitespace, optional separator, digits with optional decimal (comma or period), optional whitespace at end
-    const scoreMatch = remainingLine.match(/\s+(?:[-,:\t ]*)(\d+(?:[.,]\d+)?)\s*$/);
+    // Pattern: optional whitespace, optional separator, digits with optional decimal (comma or period), optional whitespace at end
+    const scoreMatch = remainingLine.match(/\s*(?:[-,:\t ]*)(\d+(?:[.,]\d+)?)\s*$/);
     let score = 5; // default score
     let name = remainingLine;
     
