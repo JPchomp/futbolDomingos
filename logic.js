@@ -54,11 +54,7 @@ export function buildClipboardTeams(teams) {
       lines.push("Name,Pos");
       members.forEach((member) => {
         const pos = member.pos1 ? member.pos1.trim() : "";
-        if (pos) {
-          lines.push(`${member.name},${pos}`);
-        } else {
-          lines.push(member.name);
-        }
+        lines.push(pos ? `${member.name},${pos}` : member.name);
       });
     } else {
       lines.push("Name");
@@ -159,10 +155,13 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     index,
   }));
 
-  const avgScore = pool.reduce((sum, player) => sum + player.score, 0) / numTeams;
+  const avgScore =
+    pool.reduce((sum, player) => sum + player.score, 0) / numTeams;
 
   const activeLock =
-    lockedTeam && Number.isInteger(lockedTeam.index) && lockedTeam.index < numTeams
+    lockedTeam &&
+    Number.isInteger(lockedTeam.index) &&
+    lockedTeam.index < numTeams
       ? lockedTeam
       : null;
 
@@ -171,6 +170,10 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
         .map((id) => pool.find((player) => player.id === id))
         .filter(Boolean)
     : [];
+
+  if (lockedMembers.length > teamSize) {
+    return emptyResult("Locked team exceeds team size.");
+  }
 
   const lockedMap = new Map(lockedMembers.map((player) => [player.id, true]));
 
@@ -190,17 +193,17 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
 
   function penalty(team, candidate) {
     let total = 0;
-    const natCount = team.nat[candidate.nat] || 0;
-    total += natCount * sameNatWeight;
+
+    total += (team.nat[candidate.nat] || 0) * sameNatWeight;
 
     const targetCount = targets[team.index]?.[candidate.pos1] || 0;
     const current = targetCount
-      ? (team.pos[candidate.pos1] || 0) / Math.max(1, targetCount)
+      ? (team.pos[candidate.pos1] || 0) / targetCount
       : 0;
     total += current * posWeight;
 
     const projected =
-      (team.score + candidate.score) / Math.max(1, team.members.length + 1);
+      (team.score + candidate.score) / (team.members.length + 1);
     total += Math.abs(projected - avgScore) * scoreWeight;
 
     return total;
@@ -209,12 +212,18 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
   const teamOrder = teams.map((team, idx) => ({ team, idx }));
 
   remaining.forEach((candidate) => {
-    teamOrder.sort(
-      (a, b) => a.team.members.length - b.team.members.length || a.idx - b.idx
+    const eligible = teamOrder.filter(
+      ({ team }) => team.members.length < teamSize
     );
-    let best = teamOrder[0];
+
+    if (eligible.length === 0) {
+      throw new Error("No team can accept more players.");
+    }
+
+    let best = eligible[0];
     let bestPenalty = Infinity;
-    teamOrder.forEach(({ team, idx }) => {
+
+    eligible.forEach(({ team, idx }) => {
       team.index = idx;
       const pen = penalty(team, candidate);
       if (pen < bestPenalty) {
@@ -222,6 +231,7 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
         best = { team, idx };
       }
     });
+
     const targetTeam = best.team;
     targetTeam.members.push(candidate);
     targetTeam.score += candidate.score;
@@ -232,6 +242,15 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     if (candidate.nat) {
       targetTeam.nat[candidate.nat] =
         (targetTeam.nat[candidate.nat] || 0) + 1;
+    }
+  });
+
+  // HARD INVARIANT: exact size
+  teams.forEach((team) => {
+    if (team.members.length !== teamSize) {
+      throw new Error(
+        `${team.name} has ${team.members.length}, expected ${teamSize}`
+      );
     }
   });
 
