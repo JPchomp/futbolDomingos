@@ -18,16 +18,19 @@ function samplePlayers(count) {
 }
 
 test("parseListIgnoreNumbers removes numeric prefixes", () => {
-  const input = "12. Luis Miguel\n7.5 - Jane Smith.\n  33 Carlos\n\n-- invalid";
+  const input = "1 Luis Miguel 7.5\n2. Jane Smith 8.0\n3 Carlos";
   const players = parseListIgnoreNumbers(input);
-  assert(players.length >= 3);
+  assert.equal(players.length, 3);
   assert.equal(players[0].name, "Luis Miguel");
+  assert.equal(players[0].score, 7.5);
   assert.equal(players[1].name, "Jane Smith");
+  assert.equal(players[1].score, 8.0);
   assert.equal(players[2].name, "Carlos");
+  assert.equal(players[2].score, 5); // default score when no score provided
 });
 
 test("parseListIgnoreNumbers extracts ratings as scores", () => {
-  const input = "8.5 John Doe\n7.1 - Jane Smith\nCarlos\n9,2 Maria";
+  const input = "1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos\n4 Maria 9,2";
   const players = parseListIgnoreNumbers(input);
   assert.equal(players.length, 4);
   assert.equal(players[0].name, "John Doe");

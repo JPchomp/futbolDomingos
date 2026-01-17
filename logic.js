@@ -33,18 +33,28 @@ export function parseListIgnoreNumbers(text) {
     const line = raw.trim();
     if (!line) continue;
     
-    // Match optional rating at the beginning
-    // Pattern: optional whitespace, digits with optional decimal (comma or period), optional separators (-, :, tab, space)
-    const ratingMatch = line.match(/^\s*(\d+(?:[.,]\d+)?)\s*(?:[-,:\t ]+)?\s*/);
-    let score = 5; // default score
-    let name = line;
+    // Match optional list number at the beginning (to be discarded)
+    // Pattern: optional whitespace, digits (no decimal), optional separators (., -, :, tab, space)
+    const listNumberMatch = line.match(/^\s*(\d+)\s*[.\-:\t ]*\s*/);
+    let remainingLine = line;
     
-    if (ratingMatch) {
-      // Extract the rating and convert comma to period for decimal
-      const ratingStr = ratingMatch[1].replace(',', '.');
-      score = parseFloat(ratingStr);
-      // Remove the rating from the line to get the name
-      name = line.substring(ratingMatch[0].length).trim();
+    if (listNumberMatch) {
+      // Remove the list number from the line
+      remainingLine = line.substring(listNumberMatch[0].length).trim();
+    }
+    
+    // Now try to extract score from the END of the line
+    // Pattern: optional whitespace, optional separator, digits with optional decimal (comma or period), optional whitespace at end
+    const scoreMatch = remainingLine.match(/\s*(?:[-,:\t ]*)(\d+(?:[.,]\d+)?)\s*$/);
+    let score = 5; // default score
+    let name = remainingLine;
+    
+    if (scoreMatch) {
+      // Extract the score and convert comma to period for decimal
+      const scoreStr = scoreMatch[1].replace(',', '.');
+      score = parseFloat(scoreStr);
+      // Remove the score from the line to get the name
+      name = remainingLine.substring(0, remainingLine.length - scoreMatch[0].length).trim();
     }
     
     // Remove periods from name
@@ -287,7 +297,7 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
 
 if (typeof console !== "undefined") {
   const parsed = parseListIgnoreNumbers(
-    "12. Luis Miguel\n7.5 - Jane Smith.\n...\n  33 Carlos"
+    "1 Luis Miguel 7.5\n2. Jane Smith 8.0\n3 Carlos"
   );
   console.assert(parsed.length === 3, "parseListIgnoreNumbers keeps 3 valid names");
   console.assert(parsed[0].name === "Luis Miguel", "First name cleaned");
