@@ -197,58 +197,46 @@ function App() {
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nat</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Primary position</th>
-              <th class="px-3 py-2"></th>
+              <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+              <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
+              <th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Position</th>
+              <th class="px-1 py-2"></th>
             </tr>
           </thead>
           <tbody class="bg-white divide-y divide-gray-200">
             ${players.map(
               (player) => html`
                 <tr key=${player.id}>
-                  <td class="px-3 py-2">
+                  <td class="px-2 py-2">
                     <input
                       type="text"
                       value=${player.name}
                       onChange=${(event) => updatePlayer(player.id, "name", event.target.value)}
-                      class="w-full min-w-[12rem] rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                      class="w-32 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
-                  <td class="px-3 py-2 whitespace-nowrap">
+                  <td class="px-2 py-2 whitespace-nowrap">
                     <input
                       type="number"
                       value=${player.score}
                       onChange=${(event) => updatePlayer(player.id, "score", event.target.value)}
-                      class="w-24 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                      class="w-16 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
-                  <td class="px-3 py-2 whitespace-nowrap">
-                    <input
-                      type="text"
-                      value=${player.nat}
-                      onChange=${(event) =>
-                        updatePlayer(player.id, "nat", event.target.value.toUpperCase())
-                      }
-                      class="w-20 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 text-center"
-                      maxLength="3"
-                    />
-                  </td>
-                  <td class="px-3 py-2 whitespace-nowrap">
+                  <td class="px-2 py-2 whitespace-nowrap">
                     <input
                       type="text"
                       value=${player.pos1}
                       onChange=${(event) => updatePlayer(player.id, "pos1", event.target.value)}
-                      class="w-28 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                      class="w-20 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
-                  <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <td class="px-1 py-2 text-center whitespace-nowrap">
                     <button
                       onClick=${() => removePlayer(player.id)}
-                      class="px-3 py-1 text-sm text-red-600 hover:text-red-800"
+                      class="px-2 py-1 text-lg text-red-600 hover:text-red-800 font-bold"
                     >
-                      Remove
+                      −
                     </button>
                   </td>
                 </tr>
