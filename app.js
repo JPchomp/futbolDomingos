@@ -200,7 +200,7 @@ function App() {
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
               <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nat</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Primary position</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pos.</th>
               <th class="px-3 py-2"></th>
             </tr>
           </thead>
@@ -213,7 +213,7 @@ function App() {
                       type="text"
                       value=${player.name}
                       onChange=${(event) => updatePlayer(player.id, "name", event.target.value)}
-                      class="w-full min-w-[12rem] rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                      class="w-24 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
                   <td class="px-3 py-2 whitespace-nowrap">
@@ -221,7 +221,7 @@ function App() {
                       type="number"
                       value=${player.score}
                       onChange=${(event) => updatePlayer(player.id, "score", event.target.value === "" ? "" : Number(event.target.value))}
-                      class="w-24 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                      class="w-16 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
                   <td class="px-3 py-2 whitespace-nowrap">
@@ -231,7 +231,7 @@ function App() {
                       onChange=${(event) =>
                         updatePlayer(player.id, "nat", event.target.value.toUpperCase())
                       }
-                      class="w-20 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 text-center"
+                      class="w-12 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 text-center"
                       maxLength="3"
                     />
                   </td>
@@ -240,7 +240,7 @@ function App() {
                       type="text"
                       value=${player.pos1}
                       onChange=${(event) => updatePlayer(player.id, "pos1", event.target.value)}
-                      class="w-28 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+                      class="w-16 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
                     />
                   </td>
                   <td class="px-3 py-2 text-right whitespace-nowrap">
@@ -248,7 +248,7 @@ function App() {
                       onClick=${() => removePlayer(player.id)}
                       class="px-3 py-1 text-sm text-red-600 hover:text-red-800"
                     >
-                      Remove
+                      -
                     </button>
                   </td>
                 </tr>
