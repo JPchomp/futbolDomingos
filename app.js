@@ -247,6 +247,7 @@ function App() {
                     <button
                       onClick=${() => removePlayer(player.id)}
                       class="px-3 py-1 text-sm text-red-600 hover:text-red-800"
+                      aria-label="Remove player"
                     >
                       -
                     </button>
