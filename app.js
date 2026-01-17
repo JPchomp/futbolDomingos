@@ -119,16 +119,16 @@ function App() {
       </section>
 
       <section class="bg-white shadow rounded-lg p-6">
-        <h2 class="text-xl font-semibold text-gray-900 mb-4">Bulk import</h2>
+        <h2 class="text-xl font-semibold text-gray-900 mb-4">Player list</h2>
         <p class="text-sm text-gray-600 mb-4">
-          Paste a list of players (optionally with ratings) to quickly populate the table.
+          Paste a list of players to quickly populate the table. Format: list number, name, score (e.g., "1 John Doe 8.5").
         </p>
         <textarea
           value=${pasteText}
           onChange=${(event) => setPasteText(event.target.value)}
           rows="4"
           class="w-full rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-          placeholder=${"Example:\n8.5 John Doe\nCarlos\n7.1 - Jane Smith"}
+          placeholder=${"Example:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos"}
         ></textarea>
         <div class="flex justify-end mt-3">
           <button
