@@ -37,6 +37,11 @@ const translations = {
     subsFor: "Subs for",
     noSubsAssigned: "No subs assigned.",
     language: "Language",
+    team: "Team",
+    score: "Score",
+    errorSetTeamsAndSize: "Set teams and size.",
+    errorNeedPlayers: (needed, have) => `Need ${needed} players, have ${have}.`,
+    errorLockedTeamExceeds: "Locked team exceeds team size.",
   },
   es: {
     title: "Creador de Equipos Balanceados",
@@ -64,6 +69,11 @@ const translations = {
     subsFor: "Suplentes para",
     noSubsAssigned: "No hay suplentes asignados.",
     language: "Idioma",
+    team: "Equipo",
+    score: "Puntuación",
+    errorSetTeamsAndSize: "Establezca equipos y tamaño.",
+    errorNeedPlayers: (needed, have) => `Se necesitan ${needed} jugadores, tiene ${have}.`,
+    errorLockedTeamExceeds: "El equipo bloqueado excede el tamaño del equipo.",
   }
 };
 
@@ -79,6 +89,27 @@ function App() {
   const [language, setLanguage] = useState("en");
   
   const t = translations[language];
+
+  // Helper function to translate team names
+  function translateTeamName(teamName) {
+    const match = teamName.match(/^Team (\d+)$/);
+    if (match) {
+      return `${t.team} ${match[1]}`;
+    }
+    return teamName;
+  }
+
+  // Helper function to translate error messages
+  function translateError(error) {
+    if (!error) return null;
+    if (error === "Set teams and size.") return t.errorSetTeamsAndSize;
+    if (error === "Locked team exceeds team size.") return t.errorLockedTeamExceeds;
+    const needMatch = error.match(/^Need (\d+) players, have (\d+)\.$/);
+    if (needMatch) {
+      return t.errorNeedPlayers(needMatch[1], needMatch[2]);
+    }
+    return error;
+  }
 
   const result = useMemo(
     () =>
@@ -285,7 +316,7 @@ function App() {
             ${t.cleanInputs}
           </button>
         </div>
-        ${result.error && html`<p class="text-sm text-red-600 mt-3">${result.error}</p>`}
+        ${result.error && html`<p class="text-sm text-red-600 mt-3">${translateError(result.error)}</p>`}
         ${!result.error && html`
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
             ${result.teams.map((team, index) => {
@@ -294,8 +325,8 @@ function App() {
                 <div key=${team.name} class="border border-gray-200 rounded-lg p-4">
                   <div class="flex items-start justify-between">
                     <div>
-                      <h3 class="text-lg font-semibold text-gray-900">${team.name}</h3>
-                      <p class="text-sm text-gray-500">Score: ${team.score.toFixed(1)}</p>
+                      <h3 class="text-lg font-semibold text-gray-900">${translateTeamName(team.name)}</h3>
+                      <p class="text-sm text-gray-500">${t.score}: ${team.score.toFixed(1)}</p>
                     </div>
                     <button
                       onClick=${() => toggleLockTeam(index)}
@@ -345,7 +376,7 @@ function App() {
               ${result.subs.map(
                 (group) => html`
                   <div class="border border-gray-200 rounded-lg p-4">
-                    <h3 class="text-lg font-semibold text-gray-900">${t.subsFor} ${group.teamName}</h3>
+                    <h3 class="text-lg font-semibold text-gray-900">${t.subsFor} ${translateTeamName(group.teamName)}</h3>
                     ${group.players.length === 0
                       ? html`<p class="text-sm text-gray-500 mt-2">${t.noSubsAssigned}</p>`
                       : html`
