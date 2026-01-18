@@ -9,6 +9,74 @@ import {
 const { useMemo, useState } = React;
 const html = htm.bind(React.createElement);
 
+// Translation object
+const translations = {
+  en: {
+    title: "Balanced Team Builder",
+    numTeams: "Number of teams",
+    teamSize: "Team size",
+    positionImportance: "Position importance",
+    scoreImportance: "Score importance",
+    playerList: "Player list",
+    pasteInstructions: "Paste a list of players to quickly populate the table. Format: list number, name, score (e.g., \"1 John Doe 8.5\").",
+    examplePlaceholder: "Example:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos",
+    addPlayers: "Add players",
+    players: "Players",
+    name: "Name",
+    score: "Score",
+    pos: "Pos.",
+    noPlayersYet: "No players added yet.",
+    shuffleTeams: "Shuffle teams",
+    teams: "Teams",
+    cleanInputs: "Clean inputs",
+    lock: "Lock",
+    unlock: "Unlock",
+    noPlayersAssigned: "No players assigned.",
+    copyTeams: "Copy teams",
+    subs: "Subs",
+    subsFor: "Subs for",
+    noSubsAssigned: "No subs assigned.",
+    language: "Language",
+    team: "Team",
+    scoreLabel: "Score",
+    errorSetTeamsAndSize: "Set teams and size.",
+    errorNeedPlayers: (needed, have) => `Need ${needed} players, have ${have}.`,
+    errorLockedTeamExceeds: "Locked team exceeds team size.",
+  },
+  es: {
+    title: "Creador de Equipos Balanceados",
+    numTeams: "Número de equipos",
+    teamSize: "Tamaño del equipo",
+    positionImportance: "Importancia de posición",
+    scoreImportance: "Importancia de puntuación",
+    playerList: "Lista de jugadores",
+    pasteInstructions: "Pegue una lista de jugadores para poblar rápidamente la tabla. Formato: número de lista, nombre, puntuación (ej., \"1 John Doe 8.5\").",
+    examplePlaceholder: "Ejemplo:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos",
+    addPlayers: "Agregar jugadores",
+    players: "Jugadores",
+    name: "Nombre",
+    score: "Puntuación",
+    pos: "Pos.",
+    noPlayersYet: "Aún no se han agregado jugadores.",
+    shuffleTeams: "Mezclar equipos",
+    teams: "Equipos",
+    cleanInputs: "Limpiar entradas",
+    lock: "Bloquear",
+    unlock: "Desbloquear",
+    noPlayersAssigned: "No hay jugadores asignados.",
+    copyTeams: "Copiar equipos",
+    subs: "Suplentes",
+    subsFor: "Suplentes para",
+    noSubsAssigned: "No hay suplentes asignados.",
+    language: "Idioma",
+    team: "Equipo",
+    scoreLabel: "Puntuación",
+    errorSetTeamsAndSize: "Establezca equipos y tamaño.",
+    errorNeedPlayers: (needed, have) => `Se necesitan ${needed} jugadores, tiene ${have}.`,
+    errorLockedTeamExceeds: "El equipo bloqueado excede el tamaño del equipo.",
+  }
+};
+
 function App() {
   const [players, setPlayers] = useState([]);
   const [numTeams, setNumTeams] = useState(2);
@@ -18,6 +86,30 @@ function App() {
   const [scoreWeight, setScoreWeight] = useState(1.0);
   const [pasteText, setPasteText] = useState("");
   const [lockedTeam, setLockedTeam] = useState(null);
+  const [language, setLanguage] = useState("en");
+  
+  const t = translations[language];
+
+  // Helper function to translate team names
+  function translateTeamName(teamName) {
+    const match = teamName.match(/^Team (\d+)$/);
+    if (match) {
+      return `${t.team} ${match[1]}`;
+    }
+    return teamName;
+  }
+
+  // Helper function to translate error messages
+  function translateError(error) {
+    if (!error) return null;
+    if (error === "Set teams and size.") return t.errorSetTeamsAndSize;
+    if (error === "Locked team exceeds team size.") return t.errorLockedTeamExceeds;
+    const needMatch = error.match(/^Need (\d+) players, have (\d+)\.$/);
+    if (needMatch) {
+      return t.errorNeedPlayers(needMatch[1], needMatch[2]);
+    }
+    return error;
+  }
 
   const result = useMemo(
     () =>
@@ -73,10 +165,18 @@ function App() {
   return html`
     <div class="space-y-6">
       <section class="bg-white shadow rounded-lg p-6">
-        <h1 class="text-2xl font-semibold text-gray-900 mb-4">Balanced Team Builder</h1>
+        <div class="flex justify-between items-center mb-4">
+          <h1 class="text-2xl font-semibold text-gray-900">${t.title}</h1>
+          <button
+            onClick=${() => setLanguage(language === "en" ? "es" : "en")}
+            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium"
+          >
+            ${language === "en" ? "Español" : "English"}
+          </button>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <label class="flex flex-col text-sm text-gray-700">
-            Number of teams
+            ${t.numTeams}
             <input
               type="number"
               min="1"
@@ -86,7 +186,7 @@ function App() {
             />
           </label>
           <label class="flex flex-col text-sm text-gray-700">
-            Team size
+            ${t.teamSize}
             <input
               type="number"
               min="1"
@@ -96,7 +196,7 @@ function App() {
             />
           </label>
           <label class="flex flex-col text-sm text-gray-700">
-            Position importance
+            ${t.positionImportance}
             <input
               type="number"
               step="0.1"
@@ -106,7 +206,7 @@ function App() {
             />
           </label>
           <label class="flex flex-col text-sm text-gray-700">
-            Score importance
+            ${t.scoreImportance}
             <input
               type="number"
               step="0.1"
@@ -119,35 +219,35 @@ function App() {
       </section>
 
       <section class="bg-white shadow rounded-lg p-6">
-        <h2 class="text-xl font-semibold text-gray-900 mb-4">Player list</h2>
+        <h2 class="text-xl font-semibold text-gray-900 mb-4">${t.playerList}</h2>
         <p class="text-sm text-gray-600 mb-4">
-          Paste a list of players to quickly populate the table. Format: list number, name, score (e.g., "1 John Doe 8.5").
+          ${t.pasteInstructions}
         </p>
         <textarea
           value=${pasteText}
           onChange=${(event) => setPasteText(event.target.value)}
           rows="4"
           class="w-full rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-          placeholder=${"Example:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos"}
+          placeholder=${t.examplePlaceholder}
         ></textarea>
         <div class="flex justify-end mt-3">
           <button
             onClick=${handlePaste}
             class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
           >
-            Add players
+            ${t.addPlayers}
           </button>
         </div>
       </section>
 
       <section class="bg-white shadow rounded-lg p-6 overflow-x-auto">
-        <h2 class="text-xl font-semibold text-gray-900 mb-4">Players</h2>
+        <h2 class="text-xl font-semibold text-gray-900 mb-4">${t.players}</h2>
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Score</th>
-              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pos.</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${t.name}</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${t.score}</th>
+              <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${t.pos}</th>
               <th class="px-3 py-2"></th>
             </tr>
           </thead>
@@ -193,14 +293,14 @@ function App() {
             )}
           </tbody>
         </table>
-        ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">No players added yet.</p>`}
+        ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">${t.noPlayersYet}</p>`}
         ${players.length > 0 && html`
           <div class="mt-4 flex justify-end">
             <button
               onClick=${reshuffleTeams}
               class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
             >
-              Shuffle teams
+              ${t.shuffleTeams}
             </button>
           </div>
         `}
@@ -208,15 +308,15 @@ function App() {
 
       <section class="bg-white shadow rounded-lg p-6">
         <div class="flex items-center justify-between">
-          <h2 class="text-xl font-semibold text-gray-900">Teams</h2>
+          <h2 class="text-xl font-semibold text-gray-900">${t.teams}</h2>
           <button
             onClick=${() => setPlayers(normalizePlayers(players))}
             class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
           >
-            Clean inputs
+            ${t.cleanInputs}
           </button>
         </div>
-        ${result.error && html`<p class="text-sm text-red-600 mt-3">${result.error}</p>`}
+        ${result.error && html`<p class="text-sm text-red-600 mt-3">${translateError(result.error)}</p>`}
         ${!result.error && html`
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
             ${result.teams.map((team, index) => {
@@ -225,8 +325,8 @@ function App() {
                 <div key=${team.name} class="border border-gray-200 rounded-lg p-4">
                   <div class="flex items-start justify-between">
                     <div>
-                      <h3 class="text-lg font-semibold text-gray-900">${team.name}</h3>
-                      <p class="text-sm text-gray-500">Score: ${team.score.toFixed(1)}</p>
+                      <h3 class="text-lg font-semibold text-gray-900">${translateTeamName(team.name)}</h3>
+                      <p class="text-sm text-gray-500">${t.scoreLabel}: ${team.score.toFixed(1)}</p>
                     </div>
                     <button
                       onClick=${() => toggleLockTeam(index)}
@@ -234,7 +334,7 @@ function App() {
                         isLocked ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-700"
                       }`}
                     >
-                      ${isLocked ? "Unlock" : "Lock"}
+                      ${isLocked ? t.unlock : t.lock}
                     </button>
                   </div>
                   <ul class="mt-3 space-y-2">
@@ -249,7 +349,7 @@ function App() {
                     )}
                   </ul>
                   ${team.members.length === 0 && html`
-                    <p class="text-sm text-gray-500 mt-2">No players assigned.</p>
+                    <p class="text-sm text-gray-500 mt-2">${t.noPlayersAssigned}</p>
                   `}
                 </div>
               `;
@@ -260,7 +360,7 @@ function App() {
               onClick=${copyTeams}
               class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
             >
-              Copy teams
+              ${t.copyTeams}
             </button>
           </div>
         `}
@@ -271,14 +371,14 @@ function App() {
         result.subs.some((group) => group.players.length > 0) &&
         html`
           <section class="bg-white shadow rounded-lg p-6">
-            <h2 class="text-xl font-semibold text-gray-900 mb-3">Subs</h2>
+            <h2 class="text-xl font-semibold text-gray-900 mb-3">${t.subs}</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               ${result.subs.map(
                 (group) => html`
                   <div class="border border-gray-200 rounded-lg p-4">
-                    <h3 class="text-lg font-semibold text-gray-900">Subs for ${group.teamName}</h3>
+                    <h3 class="text-lg font-semibold text-gray-900">${t.subsFor} ${translateTeamName(group.teamName)}</h3>
                     ${group.players.length === 0
-                      ? html`<p class="text-sm text-gray-500 mt-2">No subs assigned.</p>`
+                      ? html`<p class="text-sm text-gray-500 mt-2">${t.noSubsAssigned}</p>`
                       : html`
                           <ul class="mt-3 space-y-2">
                             ${group.players.map(
