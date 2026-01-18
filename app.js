@@ -38,7 +38,7 @@ const translations = {
     noSubsAssigned: "No subs assigned.",
     language: "Language",
     team: "Team",
-    score: "Score",
+    scoreLabel: "Score",
     errorSetTeamsAndSize: "Set teams and size.",
     errorNeedPlayers: (needed, have) => `Need ${needed} players, have ${have}.`,
     errorLockedTeamExceeds: "Locked team exceeds team size.",
@@ -70,7 +70,7 @@ const translations = {
     noSubsAssigned: "No hay suplentes asignados.",
     language: "Idioma",
     team: "Equipo",
-    score: "Puntuación",
+    scoreLabel: "Puntuación",
     errorSetTeamsAndSize: "Establezca equipos y tamaño.",
     errorNeedPlayers: (needed, have) => `Se necesitan ${needed} jugadores, tiene ${have}.`,
     errorLockedTeamExceeds: "El equipo bloqueado excede el tamaño del equipo.",
@@ -326,7 +326,7 @@ function App() {
                   <div class="flex items-start justify-between">
                     <div>
                       <h3 class="text-lg font-semibold text-gray-900">${translateTeamName(team.name)}</h3>
-                      <p class="text-sm text-gray-500">${t.score}: ${team.score.toFixed(1)}</p>
+                      <p class="text-sm text-gray-500">${t.scoreLabel}: ${team.score.toFixed(1)}</p>
                     </div>
                     <button
                       onClick=${() => toggleLockTeam(index)}
