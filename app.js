@@ -2,6 +2,7 @@ import {
   uid,
   parseListIgnoreNumbers,
   buildClipboardTeams,
+  buildClipboardPlayers,
   normalizePlayers,
   computeAssignments,
 } from "./logic.js";
@@ -33,6 +34,7 @@ const translations = {
     unlock: "Unlock",
     noPlayersAssigned: "No players assigned.",
     copyTeams: "Copy teams",
+    copyPlayers: "Copy players",
     subs: "Subs",
     subsFor: "Subs for",
     noSubsAssigned: "No subs assigned.",
@@ -65,6 +67,7 @@ const translations = {
     unlock: "Desbloquear",
     noPlayersAssigned: "No hay jugadores asignados.",
     copyTeams: "Copiar equipos",
+    copyPlayers: "Copiar jugadores",
     subs: "Suplentes",
     subsFor: "Suplentes para",
     noSubsAssigned: "No hay suplentes asignados.",
@@ -151,8 +154,7 @@ function App() {
     });
   }
 
-  function copyTeams() {
-    const text = buildClipboardTeams(result.teams);
+  function copyToClipboard(text) {
     if (navigator?.clipboard) {
       navigator.clipboard.writeText(text).catch(() => {
         alert("Copy failed. Please copy manually.");
@@ -160,6 +162,14 @@ function App() {
     } else {
       alert("Clipboard access unavailable. Please copy manually.");
     }
+  }
+
+  function copyTeams() {
+    copyToClipboard(buildClipboardTeams(result.teams));
+  }
+
+  function copyPlayers() {
+    copyToClipboard(buildClipboardPlayers(players));
   }
 
   return html`
@@ -295,7 +305,13 @@ function App() {
         </table>
         ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">${t.noPlayersYet}</p>`}
         ${players.length > 0 && html`
-          <div class="mt-4 flex justify-end">
+          <div class="mt-4 flex justify-end gap-2">
+            <button
+              onClick=${copyPlayers}
+              class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+            >
+              ${t.copyPlayers}
+            </button>
             <button
               onClick=${reshuffleTeams}
               class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"

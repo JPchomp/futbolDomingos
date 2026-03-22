@@ -4,6 +4,7 @@ import {
   uid,
   parseListIgnoreNumbers,
   buildClipboardTeams,
+  buildClipboardPlayers,
   computeAssignments,
 } from "../logic.js";
 
@@ -91,4 +92,53 @@ test("computeAssignments respects locked team members", () => {
   const teamOneIds = result.teams[0].members.map((member) => member.id);
   assert(teamOneIds.includes(players[0].id));
   assert(teamOneIds.includes(players[1].id));
+});
+
+test("buildClipboardPlayers outputs tab-delimited rows with name, pos, score", () => {
+  const players = [
+    { id: "a", name: "Alice", pos1: "MF", score: 7.5 },
+    { id: "b", name: "Bob", pos1: "", score: 5 },
+    { id: "c", name: "Carlos", pos1: "GK", score: 9 },
+  ];
+  const text = buildClipboardPlayers(players);
+  const lines = text.split("\n");
+  assert.equal(lines.length, 3);
+  assert.equal(lines[0], "Alice\tMF\t7.5");
+  assert.equal(lines[1], "Bob\t\t5");
+  assert.equal(lines[2], "Carlos\tGK\t9");
+});
+
+test("parseListIgnoreNumbers handles tab-delimited format with positions", () => {
+  const input = "Alice\tMF\t7.5\nBob\t\t5\nCarlos\tGK\t9";
+  const players = parseListIgnoreNumbers(input);
+  assert.equal(players.length, 3);
+  assert.equal(players[0].name, "Alice");
+  assert.equal(players[0].pos1, "MF");
+  assert.equal(players[0].score, 7.5);
+  assert.equal(players[1].name, "Bob");
+  assert.equal(players[1].pos1, "");
+  assert.equal(players[1].score, 5);
+  assert.equal(players[2].name, "Carlos");
+  assert.equal(players[2].pos1, "GK");
+  assert.equal(players[2].score, 9);
+});
+
+test("buildClipboardPlayers round-trips through parseListIgnoreNumbers", () => {
+  const original = [
+    { id: "a", name: "John Doe", pos1: "DF", score: 8 },
+    { id: "b", name: "Jane Smith", pos1: "FW", score: 7.5 },
+    { id: "c", name: "Carlos", pos1: "", score: 5 },
+  ];
+  const text = buildClipboardPlayers(original);
+  const parsed = parseListIgnoreNumbers(text);
+  assert.equal(parsed.length, 3);
+  assert.equal(parsed[0].name, "John Doe");
+  assert.equal(parsed[0].pos1, "DF");
+  assert.equal(parsed[0].score, 8);
+  assert.equal(parsed[1].name, "Jane Smith");
+  assert.equal(parsed[1].pos1, "FW");
+  assert.equal(parsed[1].score, 7.5);
+  assert.equal(parsed[2].name, "Carlos");
+  assert.equal(parsed[2].pos1, "");
+  assert.equal(parsed[2].score, 5);
 });
