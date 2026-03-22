@@ -32,7 +32,20 @@ export function parseListIgnoreNumbers(text) {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    
+
+    // Tab-delimited format: name\tpos\tscore (produced by buildClipboardPlayers)
+    if (line.includes("\t")) {
+      const parts = line.split("\t");
+      let name = (parts[0] || "").replace(/\./g, "").trim();
+      const pos1 = (parts[1] || "").trim();
+      const scoreStr = (parts[2] || "").replace(",", ".").trim();
+      const score = scoreStr ? parseFloat(scoreStr) : 5;
+      if (!name) continue;
+      if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(name)) continue;
+      out.push({ id: uid(), name, score: Number.isFinite(score) ? score : 5, pos1 });
+      continue;
+    }
+
     // Match optional list number at the beginning (to be discarded)
     // Pattern: optional whitespace, digits (no decimal), optional separators (., -, :, tab, space)
     const listNumberMatch = line.match(/^\s*(\d+)\s*[.\-:\t ]*\s*/);
@@ -88,6 +101,17 @@ export function buildClipboardTeams(teams) {
     lines.push("");
   });
   return lines.join("\n");
+}
+
+export function buildClipboardPlayers(players) {
+  return (players || [])
+    .map((player) => {
+      const name = (player.name || "").trim();
+      const pos1 = (player.pos1 || "").trim();
+      const score = Number.isFinite(Number(player.score)) ? Number(player.score) : 5;
+      return `${name}\t${pos1}\t${score}`;
+    })
+    .join("\n");
 }
 
 export function normalizePlayers(rows) {
