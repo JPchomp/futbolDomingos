@@ -4,6 +4,7 @@ import {
   uid,
   parseListIgnoreNumbers,
   buildClipboardTeams,
+  buildClipboardTeamsWithScores,
   buildClipboardPlayers,
   computeAssignments,
 } from "../logic.js";
@@ -44,7 +45,7 @@ test("parseListIgnoreNumbers extracts ratings as scores", () => {
   assert.equal(players[3].score, 9.2); // comma converted to period
 });
 
-test("buildClipboardTeams outputs CSV style rows", () => {
+test("buildClipboardTeams outputs space-separated rows", () => {
   const teams = [
     {
       name: "Team 1",
@@ -56,8 +57,36 @@ test("buildClipboardTeams outputs CSV style rows", () => {
   ];
   const text = buildClipboardTeams(teams);
   assert.match(text, /Team 1/);
-  assert.match(text, /Name,Pos/);
-  assert.match(text, /Alice,MF/);
+  assert.match(text, /Name Pos/);
+  assert.match(text, /Alice MF/);
+  assert.doesNotMatch(text, /Name,Pos/);
+  assert.doesNotMatch(text, /Alice,MF/);
+});
+
+test("buildClipboardTeamsWithScores outputs team score and player scores", () => {
+  const teams = [
+    {
+      name: "Team 1",
+      score: 15.5,
+      members: [
+        { id: "a", name: "Alice", pos1: "MF", score: 8 },
+        { id: "b", name: "Bob", pos1: "DF", score: 7.5 },
+      ],
+    },
+    {
+      name: "Team 2",
+      score: 12,
+      members: [
+        { id: "c", name: "Carlos", pos1: "", score: 6 },
+      ],
+    },
+  ];
+  const text = buildClipboardTeamsWithScores(teams);
+  assert.match(text, /Team 1 15\.5/);
+  assert.match(text, /Alice MF 8/);
+  assert.match(text, /Bob DF 7\.5/);
+  assert.match(text, /Team 2 12\.0/);
+  assert.match(text, /Carlos 6/);
 });
 
 test("computeAssignments creates balanced teams and subs", () => {

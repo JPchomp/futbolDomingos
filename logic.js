@@ -87,15 +87,40 @@ export function buildClipboardTeams(teams) {
     const members = team?.members || [];
     const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
     if (hasAnyPos) {
-      lines.push("Name,Pos");
+      lines.push("Name Pos");
       members.forEach((member) => {
         const pos = member.pos1 ? member.pos1.trim() : "";
-        lines.push(pos ? `${member.name},${pos}` : member.name);
+        lines.push(pos ? `${member.name} ${pos}` : member.name);
       });
     } else {
       lines.push("Name");
       members.forEach((member) => {
         lines.push(member.name);
+      });
+    }
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+export function buildClipboardTeamsWithScores(teams) {
+  const lines = [];
+  (teams || []).forEach((team, idx) => {
+    const label = team?.name ? String(team.name) : `Team ${idx + 1}`;
+    const totalScore = (team?.score || 0).toFixed(1);
+    lines.push(`${label} ${totalScore}`);
+    const members = team?.members || [];
+    const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
+    if (hasAnyPos) {
+      members.forEach((member) => {
+        const pos = member.pos1 ? member.pos1.trim() : "";
+        const playerScore = Number.isFinite(Number(member.score)) ? Number(member.score).toFixed(1) : "5.0";
+        lines.push(pos ? `${member.name} ${pos} ${playerScore}` : `${member.name} ${playerScore}`);
+      });
+    } else {
+      members.forEach((member) => {
+        const playerScore = Number.isFinite(Number(member.score)) ? Number(member.score).toFixed(1) : "5.0";
+        lines.push(`${member.name} ${playerScore}`);
       });
     }
     lines.push("");
@@ -334,7 +359,7 @@ if (typeof console !== "undefined") {
     { name: "Team 2", members: [{ name: "C", pos1: "F" }] },
   ]);
   console.assert(
-    clip.includes("Team 1") && clip.includes("Name,Pos") && clip.includes("A,D"),
+    clip.includes("Team 1") && clip.includes("Name Pos") && clip.includes("A D"),
     "Clipboard base format ok"
   );
 
