@@ -2,6 +2,7 @@ import {
   uid,
   parseListIgnoreNumbers,
   buildClipboardTeams,
+  buildClipboardTeamsWithScores,
   buildClipboardPlayers,
   normalizePlayers,
   computeAssignments,
@@ -10,14 +11,11 @@ import {
 const { useMemo, useState } = React;
 const html = htm.bind(React.createElement);
 
-// Translation object
 const translations = {
   en: {
     title: "Balanced Team Builder",
     numTeams: "Number of teams",
     teamSize: "Team size",
-    positionImportance: "Position importance",
-    scoreImportance: "Score importance",
     playerList: "Player list",
     pasteInstructions: "Paste a list of players to quickly populate the table. Format: list number, name, score (e.g., \"1 John Doe 8.5\").",
     examplePlaceholder: "Example:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos",
@@ -34,6 +32,7 @@ const translations = {
     unlock: "Unlock",
     noPlayersAssigned: "No players assigned.",
     copyTeams: "Copy teams",
+    copyTeamsWithScores: "Copy teams with scores",
     copyPlayers: "Copy players",
     subs: "Subs",
     subsFor: "Subs for",
@@ -49,8 +48,6 @@ const translations = {
     title: "Creador de Equipos Balanceados",
     numTeams: "Número de equipos",
     teamSize: "Tamaño del equipo",
-    positionImportance: "Importancia de posición",
-    scoreImportance: "Importancia de puntuación",
     playerList: "Lista de jugadores",
     pasteInstructions: "Pegue una lista de jugadores para poblar rápidamente la tabla. Formato: número de lista, nombre, puntuación (ej., \"1 John Doe 8.5\").",
     examplePlaceholder: "Ejemplo:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos",
@@ -67,6 +64,7 @@ const translations = {
     unlock: "Desbloquear",
     noPlayersAssigned: "No hay jugadores asignados.",
     copyTeams: "Copiar equipos",
+    copyTeamsWithScores: "Copiar equipos con puntuaciones",
     copyPlayers: "Copiar jugadores",
     subs: "Suplentes",
     subsFor: "Suplentes para",
@@ -85,8 +83,8 @@ function App() {
   const [numTeams, setNumTeams] = useState(2);
   const [teamSize, setTeamSize] = useState(5);
   const [shuffleSeed, setShuffleSeed] = useState(() => uid());
-  const [posWeight, setPosWeight] = useState(2.0);
-  const [scoreWeight, setScoreWeight] = useState(1.0);
+  const posWeight = 5;
+  const scoreWeight = 5;
   const [pasteText, setPasteText] = useState("");
   const [lockedTeam, setLockedTeam] = useState(null);
   const [language, setLanguage] = useState("en");
@@ -168,6 +166,10 @@ function App() {
     copyToClipboard(buildClipboardTeams(result.teams));
   }
 
+  function copyTeamsWithScores() {
+    copyToClipboard(buildClipboardTeamsWithScores(result.teams));
+  }
+
   function copyPlayers() {
     copyToClipboard(buildClipboardPlayers(players));
   }
@@ -202,26 +204,6 @@ function App() {
               min="1"
               value=${teamSize}
               onChange=${(event) => setTeamSize(event.target.value === "" ? "" : Number(event.target.value))}
-              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-            />
-          </label>
-          <label class="flex flex-col text-sm text-gray-700">
-            ${t.positionImportance}
-            <input
-              type="number"
-              step="0.1"
-              value=${posWeight}
-              onChange=${(event) => setPosWeight(event.target.value === "" ? "" : Number(event.target.value))}
-              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-            />
-          </label>
-          <label class="flex flex-col text-sm text-gray-700">
-            ${t.scoreImportance}
-            <input
-              type="number"
-              step="0.1"
-              value=${scoreWeight}
-              onChange=${(event) => setScoreWeight(event.target.value === "" ? "" : Number(event.target.value))}
               class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
             />
           </label>
@@ -371,12 +353,18 @@ function App() {
               `;
             })}
           </div>
-          <div class="mt-6 flex justify-end">
+          <div class="mt-6 flex justify-end gap-2">
             <button
               onClick=${copyTeams}
               class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
             >
               ${t.copyTeams}
+            </button>
+            <button
+              onClick=${copyTeamsWithScores}
+              class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
+            >
+              ${t.copyTeamsWithScores}
             </button>
           </div>
         `}
