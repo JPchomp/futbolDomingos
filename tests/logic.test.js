@@ -123,6 +123,48 @@ test("computeAssignments respects locked team members", () => {
   assert(teamOneIds.includes(players[1].id));
 });
 
+test("computeAssignments minimizes total score discrepancy between teams", () => {
+  // Players with a wide score range (10 down to 3): total = 52, optimal split = 26/26.
+  const players = Array.from({ length: 8 }, (_, i) => ({
+    id: String(i + 1),
+    name: `Player ${i + 1}`,
+    score: 10 - i,
+    pos1: "",
+  }));
+  const result = computeAssignments(players, {
+    numTeams: 2,
+    teamSize: 4,
+    seed: "",
+    posWeight: 0,
+    scoreWeight: 1,
+  });
+  assert.equal(result.error, null);
+  const scores = result.teams.map((t) => t.score);
+  const maxDiff = Math.max(...scores) - Math.min(...scores);
+  assert.equal(maxDiff, 0, `Score difference ${maxDiff} should be 0 for evenly distributable scores`);
+});
+
+test("computeAssignments keeps score discrepancy small for 3 teams", () => {
+  // 12 players, scores 1–12, total = 78, optimal split = 26 each.
+  const players = Array.from({ length: 12 }, (_, i) => ({
+    id: String(i + 1),
+    name: `Player ${i + 1}`,
+    score: i + 1,
+    pos1: "",
+  }));
+  const result = computeAssignments(players, {
+    numTeams: 3,
+    teamSize: 4,
+    seed: "",
+    posWeight: 0,
+    scoreWeight: 1,
+  });
+  assert.equal(result.error, null);
+  const scores = result.teams.map((t) => t.score);
+  const maxDiff = Math.max(...scores) - Math.min(...scores);
+  assert.ok(maxDiff <= 1, `Score difference ${maxDiff} should be ≤ 1 for scores 1–12 into 3 teams`);
+});
+
 test("buildClipboardPlayers outputs tab-delimited rows with name, pos, score", () => {
   const players = [
     { id: "a", name: "Alice", pos1: "MF", score: 7.5 },
