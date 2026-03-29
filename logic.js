@@ -79,21 +79,22 @@ export function parseListIgnoreNumbers(text) {
   return out;
 }
 
+const SHIRT_COLORS = ["White", "Black", "Orange", "Yellow"];
+
 export function buildClipboardTeams(teams) {
   const lines = [];
   (teams || []).forEach((team, idx) => {
     const label = team?.name ? String(team.name) : `Team ${idx + 1}`;
-    lines.push(label);
+    const color = SHIRT_COLORS[idx % SHIRT_COLORS.length];
+    lines.push(`${label} - ${color}`);
     const members = team?.members || [];
     const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
     if (hasAnyPos) {
-      lines.push("Name Pos");
       members.forEach((member) => {
         const pos = member.pos1 ? member.pos1.trim() : "";
         lines.push(pos ? `${member.name} ${pos}` : member.name);
       });
     } else {
-      lines.push("Name");
       members.forEach((member) => {
         lines.push(member.name);
       });
@@ -359,7 +360,7 @@ if (typeof console !== "undefined") {
     { name: "Team 2", members: [{ name: "C", pos1: "F" }] },
   ]);
   console.assert(
-    clip.includes("Team 1") && clip.includes("Name Pos") && clip.includes("A D"),
+    clip.includes("Team 1 - White") && !clip.includes("Name Pos") && clip.includes("A D"),
     "Clipboard base format ok"
   );
 
@@ -367,7 +368,7 @@ if (typeof console !== "undefined") {
     { name: "Team 3", members: [{ name: "X", pos1: "" }, { name: "Y", pos1: "" }] },
   ]);
   console.assert(
-    clipNoPos.includes("Team 3") && clipNoPos.includes("Name\nX\nY"),
+    clipNoPos.includes("Team 3 - White") && clipNoPos.includes("X\nY"),
     "Clipboard no-pos format ok"
   );
 }
