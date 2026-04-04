@@ -266,9 +266,12 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
       : 0;
     total += current * posWeight;
 
-    const projected =
-      (team.score + candidate.score) / (team.members.length + 1);
-    total += Math.abs(projected - avgScore) * scoreWeight;
+    // Use quadratic penalty on total team score vs the proportional target.
+    // This heavily penalizes large score discrepancies between teams.
+    const projectedTotal = team.score + candidate.score;
+    const partialTarget = avgScore * (team.members.length + 1) / teamSize;
+    const diff = projectedTotal - partialTarget;
+    total += diff * diff * scoreWeight;
 
     return total;
   }
@@ -313,6 +316,61 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
       );
     }
   });
+
+  // Post-processing: iteratively swap non-locked players between teams to
+  // minimize the maximum total-score difference between any two teams.
+  function improveBalance() {
+    let improved = true;
+    while (improved) {
+      improved = false;
+      const scores = teams.map((t) => t.score);
+      const maxDiff = Math.max(...scores) - Math.min(...scores);
+      if (maxDiff === 0) break;
+
+      for (let i = 0; i < teams.length && !improved; i += 1) {
+        for (let j = i + 1; j < teams.length && !improved; j += 1) {
+          const ti = teams[i];
+          const tj = teams[j];
+          for (let pi = 0; pi < ti.members.length && !improved; pi += 1) {
+            const playerI = ti.members[pi];
+            if (lockedMap.has(playerI.id)) continue;
+            for (let pj = 0; pj < tj.members.length && !improved; pj += 1) {
+              const playerJ = tj.members[pj];
+              if (lockedMap.has(playerJ.id)) continue;
+              const ni = ti.score - playerI.score + playerJ.score;
+              const nj = tj.score - playerJ.score + playerI.score;
+              // Compute new max-diff without allocating a new array.
+              let newMax = -Infinity;
+              let newMin = Infinity;
+              for (let k = 0; k < scores.length; k += 1) {
+                const s = k === i ? ni : k === j ? nj : scores[k];
+                if (s > newMax) newMax = s;
+                if (s < newMin) newMin = s;
+              }
+              if (newMax - newMin < maxDiff) {
+                ti.members[pi] = playerJ;
+                ti.score = ni;
+                tj.members[pj] = playerI;
+                tj.score = nj;
+                improved = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Recalculate position tracking to reflect any swaps.
+    teams.forEach((team) => {
+      team.pos = {};
+      team.members.forEach((member) => {
+        if (member.pos1) {
+          team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
+        }
+      });
+    });
+  }
+  improveBalance();
 
   const subs = teams.map((team) => ({
     teamName: team.name,
