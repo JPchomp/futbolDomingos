@@ -199,6 +199,38 @@ test("computeAssignments balances per-position scores across teams", () => {
   assert.ok(mfDiff <= 1, `MF score difference ${mfDiff} should be ≤ 1`);
 });
 
+test("computeAssignments does not crash with only one player of a position across many teams", () => {
+  // 1 GK for 4 teams — the GK cannot be distributed evenly, but the algorithm must not crash.
+  const players = [
+    { id: "1",  name: "GK1",  score: 8, pos1: "GK" },
+    ...Array.from({ length: 15 }, (_, i) => ({
+      id: String(i + 2),
+      name: `DF${i + 1}`,
+      score: 5 + (i % 4),
+      pos1: "DF",
+    })),
+  ];
+  let result;
+  assert.doesNotThrow(() => {
+    result = computeAssignments(players, {
+      numTeams: 4,
+      teamSize: 4,
+      seed: "edge",
+      posWeight: 5,
+      scoreWeight: 1,
+    });
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.teams.length, 4);
+  result.teams.forEach((team) => {
+    assert.equal(team.members.length, 4);
+    assert.ok(team.posScore !== undefined, "team.posScore should be defined");
+  });
+  // The single GK must end up on exactly one team.
+  const gkCounts = result.teams.map((t) => t.members.filter((m) => m.pos1 === "GK").length);
+  assert.equal(gkCounts.reduce((a, b) => a + b, 0), 1, "Exactly 1 GK across all teams");
+});
+
 test("buildClipboardPlayers outputs tab-delimited rows with name, pos, score", () => {
   const players = [
     { id: "a", name: "Alice", pos1: "MF", score: 7.5 },
