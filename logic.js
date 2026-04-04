@@ -317,15 +317,38 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     }
   });
 
+  // Composite imbalance metric combining total-score spread and per-position
+  // score spread, weighted by scoreWeight and posWeight respectively.
+  function computeImbalance(scores, posScoresByTeam) {
+    const scoreImbalance = (Math.max(...scores) - Math.min(...scores)) * scoreWeight;
+    let posImbalance = 0;
+    for (const pos of allPos) {
+      const posTeamScores = posScoresByTeam.map((ps) => ps[pos] || 0);
+      posImbalance += Math.max(...posTeamScores) - Math.min(...posTeamScores);
+    }
+    return scoreImbalance + posImbalance * posWeight;
+  }
+
   // Post-processing: iteratively swap non-locked players between teams to
-  // minimize the maximum total-score difference between any two teams.
+  // minimize the composite imbalance (total score + per-position score spread).
   function improveBalance() {
+    // Initialize per-position score sums from current team members.
+    teams.forEach((team) => {
+      team.posScore = {};
+      team.members.forEach((member) => {
+        if (member.pos1) {
+          team.posScore[member.pos1] = (team.posScore[member.pos1] || 0) + member.score;
+        }
+      });
+    });
+
     let improved = true;
     while (improved) {
       improved = false;
       const scores = teams.map((t) => t.score);
-      const maxDiff = Math.max(...scores) - Math.min(...scores);
-      if (maxDiff === 0) break;
+      const posScores = teams.map((t) => t.posScore);
+      const currentImbalance = computeImbalance(scores, posScores);
+      if (currentImbalance === 0) break;
 
       for (let i = 0; i < teams.length && !improved; i += 1) {
         for (let j = i + 1; j < teams.length && !improved; j += 1) {
@@ -339,19 +362,31 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
               if (lockedMap.has(playerJ.id)) continue;
               const ni = ti.score - playerI.score + playerJ.score;
               const nj = tj.score - playerJ.score + playerI.score;
-              // Compute new max-diff without allocating a new array.
-              let newMax = -Infinity;
-              let newMin = Infinity;
-              for (let k = 0; k < scores.length; k += 1) {
-                const s = k === i ? ni : k === j ? nj : scores[k];
-                if (s > newMax) newMax = s;
-                if (s < newMin) newMin = s;
+
+              // Project new per-position scores for the two teams being swapped.
+              const newPosI = { ...posScores[i] };
+              const newPosJ = { ...posScores[j] };
+              if (playerI.pos1) {
+                newPosI[playerI.pos1] = (newPosI[playerI.pos1] || 0) - playerI.score;
+                newPosJ[playerI.pos1] = (newPosJ[playerI.pos1] || 0) + playerI.score;
               }
-              if (newMax - newMin < maxDiff) {
+              if (playerJ.pos1) {
+                newPosJ[playerJ.pos1] = (newPosJ[playerJ.pos1] || 0) - playerJ.score;
+                newPosI[playerJ.pos1] = (newPosI[playerJ.pos1] || 0) + playerJ.score;
+              }
+
+              const newScores = scores.map((s, k) => (k === i ? ni : k === j ? nj : s));
+              const newPosScores = posScores.map((ps, k) =>
+                k === i ? newPosI : k === j ? newPosJ : ps
+              );
+
+              if (computeImbalance(newScores, newPosScores) < currentImbalance) {
                 ti.members[pi] = playerJ;
                 ti.score = ni;
+                ti.posScore = newPosI;
                 tj.members[pj] = playerI;
                 tj.score = nj;
+                tj.posScore = newPosJ;
                 improved = true;
               }
             }
@@ -360,7 +395,7 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
       }
     }
 
-    // Recalculate position tracking to reflect any swaps.
+    // Recalculate position count tracking to reflect any swaps.
     teams.forEach((team) => {
       team.pos = {};
       team.members.forEach((member) => {

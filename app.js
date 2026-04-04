@@ -325,6 +325,11 @@ function App() {
                     <div>
                       <h3 class="text-lg font-semibold text-gray-900">${translateTeamName(team.name)}</h3>
                       <p class="text-sm text-gray-500">${t.scoreLabel}: ${team.score.toFixed(1)}</p>
+                      ${result.allPos.length > 0 && html`
+                        <p class="text-xs text-gray-400 mt-0.5">
+                          ${result.allPos.map((pos) => `${pos}: ${(team.posScore?.[pos] || 0).toFixed(1)}`).join(' · ')}
+                        </p>
+                      `}
                     </div>
                     <button
                       onClick=${() => toggleLockTeam(index)}

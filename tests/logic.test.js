@@ -165,6 +165,40 @@ test("computeAssignments keeps score discrepancy small for 3 teams", () => {
   assert.ok(maxDiff <= 1, `Score difference ${maxDiff} should be ≤ 1 for scores 1–12 into 3 teams`);
 });
 
+test("computeAssignments balances per-position scores across teams", () => {
+  // 8 players split evenly: 4 DF and 4 MF, each position has scores 10,9,6,5.
+  // Optimal split for each position: both teams get two players totalling 15 each.
+  const players = [
+    { id: "1", name: "DF1", score: 10, pos1: "DF" },
+    { id: "2", name: "DF2", score: 9,  pos1: "DF" },
+    { id: "3", name: "DF3", score: 6,  pos1: "DF" },
+    { id: "4", name: "DF4", score: 5,  pos1: "DF" },
+    { id: "5", name: "MF1", score: 10, pos1: "MF" },
+    { id: "6", name: "MF2", score: 9,  pos1: "MF" },
+    { id: "7", name: "MF3", score: 6,  pos1: "MF" },
+    { id: "8", name: "MF4", score: 5,  pos1: "MF" },
+  ];
+  const result = computeAssignments(players, {
+    numTeams: 2,
+    teamSize: 4,
+    seed: "",
+    posWeight: 5,
+    scoreWeight: 1,
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.teams.length, 2);
+  // Each team should have posScore close to 15 for DF and 15 for MF.
+  result.teams.forEach((team) => {
+    assert.ok(team.posScore !== undefined, "team.posScore should be defined");
+  });
+  const dfScores = result.teams.map((t) => t.posScore?.DF || 0);
+  const mfScores = result.teams.map((t) => t.posScore?.MF || 0);
+  const dfDiff = Math.abs(dfScores[0] - dfScores[1]);
+  const mfDiff = Math.abs(mfScores[0] - mfScores[1]);
+  assert.ok(dfDiff <= 1, `DF score difference ${dfDiff} should be ≤ 1`);
+  assert.ok(mfDiff <= 1, `MF score difference ${mfDiff} should be ≤ 1`);
+});
+
 test("buildClipboardPlayers outputs tab-delimited rows with name, pos, score", () => {
   const players = [
     { id: "a", name: "Alice", pos1: "MF", score: 7.5 },
