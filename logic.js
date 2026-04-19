@@ -403,6 +403,53 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
   };
 }
 
+const DB_KEY = "futbolDomingos_playerDb";
+
+export function loadPlayerDatabase() {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(DB_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePlayerDatabase(db) {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+}
+
+function normalizeName(name) {
+  return (name || "").trim().toLowerCase();
+}
+
+export function matchPlayersFromDatabase(parsed, db) {
+  return parsed.map((player) => {
+    const key = normalizeName(player.name);
+    const entry = (db || []).find((e) => normalizeName(e.name) === key);
+    if (entry) {
+      return { ...player, score: entry.score, pos1: entry.pos1 };
+    }
+    return player;
+  });
+}
+
+export function updateDatabase(players, db) {
+  const updated = [...(db || [])];
+  for (const player of players) {
+    const key = normalizeName(player.name);
+    const index = updated.findIndex((e) => normalizeName(e.name) === key);
+    const entry = { name: player.name, score: player.score, pos1: player.pos1 };
+    if (index >= 0) {
+      updated[index] = entry;
+    } else {
+      updated.push(entry);
+    }
+  }
+  return updated;
+}
+
 if (typeof console !== "undefined") {
   const parsed = parseListIgnoreNumbers(
     "1 Luis Miguel 7.5\n2. Jane Smith 8.0\n3 Carlos"
