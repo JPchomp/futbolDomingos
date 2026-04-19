@@ -440,7 +440,7 @@ export function updateDatabase(players, db) {
   for (const player of players) {
     const key = normalizeName(player.name);
     const index = updated.findIndex((e) => normalizeName(e.name) === key);
-    const entry = { name: player.name, score: player.score, pos1: player.pos1 };
+    const entry = { name: index >= 0 ? updated[index].name : player.name, score: player.score, pos1: player.pos1 };
     if (index >= 0) {
       updated[index] = entry;
     } else {
