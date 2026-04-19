@@ -6,6 +6,10 @@ import {
   buildClipboardPlayers,
   normalizePlayers,
   computeAssignments,
+  loadPlayerDatabase,
+  savePlayerDatabase,
+  matchPlayersFromDatabase,
+  updateDatabase,
 } from "./logic.js";
 
 const { useMemo, useState } = React;
@@ -20,6 +24,8 @@ const translations = {
     pasteInstructions: "Paste a list of players to quickly populate the table. Format: list number, name, score (e.g., \"1 John Doe 8.5\").",
     examplePlaceholder: "Example:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos",
     addPlayers: "Add players",
+    addPlayersFromDb: "Add players using database",
+    uploadToDb: "Upload current data to database",
     players: "Players",
     name: "Name",
     score: "Score",
@@ -52,6 +58,8 @@ const translations = {
     pasteInstructions: "Pegue una lista de jugadores para poblar rápidamente la tabla. Formato: número de lista, nombre, puntuación (ej., \"1 John Doe 8.5\").",
     examplePlaceholder: "Ejemplo:\n1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos",
     addPlayers: "Agregar jugadores",
+    addPlayersFromDb: "Agregar jugadores usando base de datos",
+    uploadToDb: "Subir datos actuales a la base de datos",
     players: "Jugadores",
     name: "Nombre",
     score: "Puntuación",
@@ -138,6 +146,21 @@ function App() {
     setPasteText("");
   }
 
+  function handlePasteWithDb() {
+    const parsed = parseListIgnoreNumbers(pasteText);
+    const db = loadPlayerDatabase();
+    const matched = matchPlayersFromDatabase(parsed, db);
+    setPlayers((prev) => [...prev, ...matched]);
+    setPasteText("");
+  }
+
+  function handleUploadToDb() {
+    const normalized = normalizePlayers(players);
+    const db = loadPlayerDatabase();
+    const updated = updateDatabase(normalized, db);
+    savePlayerDatabase(updated);
+  }
+
   function reshuffleTeams() {
     setShuffleSeed(uid());
   }
@@ -222,12 +245,18 @@ function App() {
           class="w-full rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
           placeholder=${t.examplePlaceholder}
         ></textarea>
-        <div class="flex justify-end mt-3">
+        <div class="flex flex-wrap justify-end gap-2 mt-3">
           <button
             onClick=${handlePaste}
             class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
           >
             ${t.addPlayers}
+          </button>
+          <button
+            onClick=${handlePasteWithDb}
+            class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+          >
+            ${t.addPlayersFromDb}
           </button>
         </div>
       </section>
@@ -287,7 +316,13 @@ function App() {
         </table>
         ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">${t.noPlayersYet}</p>`}
         ${players.length > 0 && html`
-          <div class="mt-4 flex justify-end gap-2">
+          <div class="mt-4 flex flex-wrap justify-end gap-2">
+            <button
+              onClick=${handleUploadToDb}
+              class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
+            >
+              ${t.uploadToDb}
+            </button>
             <button
               onClick=${copyPlayers}
               class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"

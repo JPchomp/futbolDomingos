@@ -7,6 +7,8 @@ import {
   buildClipboardTeamsWithScores,
   buildClipboardPlayers,
   computeAssignments,
+  matchPlayersFromDatabase,
+  updateDatabase,
 } from "../logic.js";
 
 function samplePlayers(count) {
@@ -212,4 +214,57 @@ test("buildClipboardPlayers round-trips through parseListIgnoreNumbers", () => {
   assert.equal(parsed[2].name, "Carlos");
   assert.equal(parsed[2].pos1, "");
   assert.equal(parsed[2].score, 5);
+});
+
+test("matchPlayersFromDatabase enriches matching players from db", () => {
+  const db = [
+    { name: "Alice", score: 9, pos1: "GK" },
+    { name: "Bob", score: 7.5, pos1: "DF" },
+  ];
+  const parsed = [
+    { id: "a", name: "Alice", score: 5, pos1: "" },
+    { id: "b", name: "Bob", score: 5, pos1: "" },
+    { id: "c", name: "Carlos", score: 5, pos1: "" },
+  ];
+  const result = matchPlayersFromDatabase(parsed, db);
+  assert.equal(result[0].score, 9);
+  assert.equal(result[0].pos1, "GK");
+  assert.equal(result[1].score, 7.5);
+  assert.equal(result[1].pos1, "DF");
+  assert.equal(result[2].score, 5);
+  assert.equal(result[2].pos1, "");
+});
+
+test("matchPlayersFromDatabase is case-insensitive", () => {
+  const db = [{ name: "Alice", score: 9, pos1: "GK" }];
+  const parsed = [{ id: "a", name: "alice", score: 5, pos1: "" }];
+  const result = matchPlayersFromDatabase(parsed, db);
+  assert.equal(result[0].score, 9);
+});
+
+test("updateDatabase creates new entries and updates existing ones", () => {
+  const db = [
+    { name: "Alice", score: 9, pos1: "GK" },
+  ];
+  const players = [
+    { id: "a", name: "Alice", score: 8, pos1: "DF" },
+    { id: "b", name: "Bob", score: 7, pos1: "MF" },
+  ];
+  const result = updateDatabase(players, db);
+  assert.equal(result.length, 2);
+  const alice = result.find((e) => e.name === "Alice");
+  assert.equal(alice.score, 8);
+  assert.equal(alice.pos1, "DF");
+  const bob = result.find((e) => e.name === "Bob");
+  assert.equal(bob.score, 7);
+  assert.equal(bob.pos1, "MF");
+});
+
+test("updateDatabase is case-insensitive when matching existing entries", () => {
+  const db = [{ name: "Alice", score: 9, pos1: "GK" }];
+  const players = [{ id: "a", name: "alice", score: 6, pos1: "FW" }];
+  const result = updateDatabase(players, db);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].score, 6);
+  assert.equal(result[0].pos1, "FW");
 });
