@@ -60,7 +60,8 @@ test("buildClipboardTeams outputs space-separated rows", () => {
   const text = buildClipboardTeams(teams);
   assert.match(text, /Team 1 - White/);
   assert.doesNotMatch(text, /Name Pos/);
-  assert.match(text, /Alice MF/);
+  assert.match(text, /Alice/);
+  assert.doesNotMatch(text, /Alice MF/);
   assert.doesNotMatch(text, /Name,Pos/);
   assert.doesNotMatch(text, /Alice,MF/);
 });

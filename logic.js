@@ -88,17 +88,9 @@ export function buildClipboardTeams(teams) {
     const color = SHIRT_COLORS[idx % SHIRT_COLORS.length];
     lines.push(`${label} - ${color}`);
     const members = team?.members || [];
-    const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
-    if (hasAnyPos) {
-      members.forEach((member) => {
-        const pos = member.pos1 ? member.pos1.trim() : "";
-        lines.push(pos ? `${member.name} ${pos}` : member.name);
-      });
-    } else {
-      members.forEach((member) => {
-        lines.push(member.name);
-      });
-    }
+    members.forEach((member) => {
+      lines.push(member.name);
+    });
     lines.push("");
   });
   return lines.join("\n");
@@ -465,7 +457,7 @@ if (typeof console !== "undefined") {
     { name: "Team 2", members: [{ name: "C", pos1: "F" }] },
   ]);
   console.assert(
-    clip.includes("Team 1 - White") && !clip.includes("Name Pos") && clip.includes("A D"),
+    clip.includes("Team 1 - White") && !clip.includes("Name Pos") && clip.includes("A\n"),
     "Clipboard base format ok"
   );
 
