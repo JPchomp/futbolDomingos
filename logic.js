@@ -1,5 +1,20 @@
 const RANDOM_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 
+// Ratings live on a 0–10 scale. Anything outside it is a typo (a shirt number,
+// a phone number, a stray "85" meant as "8,5") rather than a rating.
+export const MIN_SCORE = 0;
+export const MAX_SCORE = 10;
+export const DEFAULT_SCORE = 5;
+
+// Preset trade-offs between levelling team totals and spreading positions.
+// The number is roughly "how many points of team-total gap we will accept to
+// give every team one more correctly-placed specialist".
+export const BALANCE_PRESETS = {
+  score: { scoreWeight: 1, posWeight: 0.25 },
+  balanced: { scoreWeight: 1, posWeight: 1 },
+  positions: { scoreWeight: 1, posWeight: 4 },
+};
+
 export function uid(length = 7) {
   let out = "";
   for (let i = 0; i < length; i += 1) {
@@ -26,57 +41,155 @@ export function seededShuffle(arr, seed) {
   return copy;
 }
 
-export function parseListIgnoreNumbers(text) {
-  const lines = text.split(/\r?\n/);
-  const out = [];
-  for (const raw of lines) {
+/**
+ * Turn any user-supplied value into a usable rating.
+ * Returns the status so callers can tell the user what happened instead of
+ * silently inventing a number.
+ */
+export function coerceScore(value) {
+  if (value === null || value === undefined) {
+    return { score: DEFAULT_SCORE, status: "default" };
+  }
+  if (typeof value === "string" && value.trim() === "") {
+    return { score: DEFAULT_SCORE, status: "default" };
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return { score: DEFAULT_SCORE, status: "default" };
+  if (parsed < MIN_SCORE) return { score: MIN_SCORE, status: "clamped" };
+  if (parsed > MAX_SCORE) return { score: MAX_SCORE, status: "clamped" };
+  return { score: parsed, status: "ok" };
+}
+
+export function isValidScore(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= MIN_SCORE && parsed <= MAX_SCORE;
+}
+
+// Multi-letter position abbreviations we are willing to split off the end of a
+// pasted name. Single letters are deliberately excluded — "Juan A" is a name.
+const KNOWN_POSITIONS = new Set([
+  "GK", "DF", "MF", "FW", "CB", "LB", "RB", "CM", "CDM", "CAM", "LM", "RM",
+  "LW", "RW", "ST", "ARQ", "POR", "DEF", "MED", "DEL", "VOL", "LAT", "EXT",
+  "ALA", "PIVOT", "CIERRE",
+]);
+
+const TEAM_HEADER = /^(team|equipo)\s*\d+\b/i;
+const HAS_LETTER = /[A-Za-zÀ-ÖØ-öø-ÿ]/;
+
+export function normalizePosition(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+/**
+ * Collapse a name to a comparison key: accents, punctuation, casing and
+ * repeated spaces all stop mattering. "José  Muñoz" and "jose munoz" match.
+ */
+export function normalizeNameKey(name) {
+  return String(name ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function splitTrailingPosition(name) {
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return { name, pos1: "" };
+  const candidate = normalizePosition(parts[parts.length - 1]);
+  if (!KNOWN_POSITIONS.has(candidate)) return { name, pos1: "" };
+  const rest = parts.slice(0, -1).join(" ");
+  if (!HAS_LETTER.test(rest)) return { name, pos1: "" };
+  return { name: rest, pos1: candidate };
+}
+
+function cleanName(raw) {
+  return raw
+    .replace(/\./g, "")
+    .replace(/[\s,:;\-]+$/, "")
+    .trim();
+}
+
+/**
+ * Parse pasted text into players, reporting anything suspicious rather than
+ * quietly turning it into a rating.
+ *
+ * Returns { players, warnings }. Warnings are structured so the UI can
+ * translate them.
+ */
+export function parseList(text) {
+  const warnings = [];
+  const rejectedScores = [];
+  const players = [];
+
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
 
-    // Tab-delimited format: name\tpos\tscore (produced by buildClipboardPlayers)
+    // Tab-delimited: name \t pos \t score (what "Copy players" produces).
     if (line.includes("\t")) {
       const parts = line.split("\t");
-      let name = (parts[0] || "").replace(/\./g, "").trim();
-      const pos1 = (parts[1] || "").trim();
-      const scoreStr = (parts[2] || "").replace(",", ".").trim();
-      const score = scoreStr ? parseFloat(scoreStr) : 5;
-      if (!name) continue;
-      if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(name)) continue;
-      out.push({ id: uid(), name, score: Number.isFinite(score) ? score : 5, pos1 });
+      const name = cleanName(parts[0] || "");
+      if (!name || !HAS_LETTER.test(name)) continue;
+      const rawScore = (parts[2] || "").replace(",", ".").trim();
+      const hasScore = rawScore !== "" && isValidScore(rawScore);
+      if (rawScore !== "" && !hasScore) rejectedScores.push(name);
+      players.push({
+        id: uid(),
+        name,
+        score: hasScore ? Number(rawScore) : DEFAULT_SCORE,
+        pos1: normalizePosition(parts[1] || ""),
+        hasScore,
+      });
       continue;
     }
 
-    // Match optional list number at the beginning (to be discarded)
-    // Pattern: optional whitespace, digits (no decimal), optional separators (., -, :, tab, space)
-    const listNumberMatch = line.match(/^\s*(\d+)\s*[.\-:\t ]*\s*/);
-    let remainingLine = line;
-    
-    if (listNumberMatch) {
-      // Remove the list number from the line
-      remainingLine = line.substring(listNumberMatch[0].length).trim();
+    // Team headers emitted by the "Copy teams" buttons are not players.
+    if (TEAM_HEADER.test(line)) continue;
+
+    // Drop a leading list number ("1.", "2 -", "3:").
+    const listNumber = line.match(/^\s*\d+\s*[.\-:\t ]+\s*/);
+    let rest = listNumber ? line.slice(listNumber[0].length).trim() : line;
+    // A bare "10" is a list number with nothing after it.
+    if (!listNumber && /^\d+$/.test(rest)) continue;
+
+    rest = rest.replace(/[\s.,:;]+$/, "");
+
+    // A trailing number is the rating — but only if it could actually be one.
+    let score = DEFAULT_SCORE;
+    let hasScore = false;
+    let rejected = null;
+    const scoreMatch = rest.match(/^(.*?)[\s,:;\t]*(-?\d+(?:[.,]\d+)?)$/);
+    if (scoreMatch && HAS_LETTER.test(scoreMatch[1])) {
+      const value = Number(scoreMatch[2].replace(",", "."));
+      rest = scoreMatch[1];
+      if (isValidScore(value)) {
+        score = value;
+        hasScore = true;
+      } else {
+        rejected = scoreMatch[2];
+      }
     }
-    
-    // Now try to extract score from the END of the line
-    // Pattern: optional whitespace, optional separator, digits with optional decimal (comma or period), optional whitespace at end
-    const scoreMatch = remainingLine.match(/\s*(?:[-,:\t ]*)(\d+(?:[.,]\d+)?)\s*$/);
-    let score = 5; // default score
-    let name = remainingLine;
-    
-    if (scoreMatch) {
-      // Extract the score and convert comma to period for decimal
-      const scoreStr = scoreMatch[1].replace(',', '.');
-      score = parseFloat(scoreStr);
-      // Remove the score from the line to get the name
-      name = remainingLine.substring(0, remainingLine.length - scoreMatch[0].length).trim();
-    }
-    
-    // Remove periods from name
-    name = name.replace(/\./g, "").trim();
-    if (!name) continue;
-    if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(name)) continue;
-    out.push({ id: uid(), name, score, pos1: "" });
+
+    let name = cleanName(rest);
+    if (!name || !HAS_LETTER.test(name)) continue;
+
+    const split = splitTrailingPosition(name);
+    name = split.name;
+    if (rejected !== null) rejectedScores.push(name);
+
+    players.push({ id: uid(), name, score, pos1: split.pos1, hasScore });
   }
-  return out;
+
+  if (rejectedScores.length) {
+    warnings.push({ code: "scoreOutOfRange", names: rejectedScores });
+  }
+  return { players, warnings };
+}
+
+// Back-compatible wrapper: the players only.
+export function parseListIgnoreNumbers(text) {
+  return parseList(text).players;
 }
 
 const SHIRT_COLORS = ["White", "Black", "Orange", "Yellow"];
@@ -112,18 +225,11 @@ export function buildClipboardTeamsWithScores(teams) {
     lines.push(`${label} ${totalScore}`);
     const members = team?.members || [];
     const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
-    if (hasAnyPos) {
-      members.forEach((member) => {
-        const pos = member.pos1 ? member.pos1.trim() : "";
-        const playerScore = Number.isFinite(Number(member.score)) ? Number(member.score).toFixed(1) : "5.0";
-        lines.push(pos ? `${member.name} ${pos} ${playerScore}` : `${member.name} ${playerScore}`);
-      });
-    } else {
-      members.forEach((member) => {
-        const playerScore = Number.isFinite(Number(member.score)) ? Number(member.score).toFixed(1) : "5.0";
-        lines.push(`${member.name} ${playerScore}`);
-      });
-    }
+    members.forEach((member) => {
+      const pos = hasAnyPos && member.pos1 ? member.pos1.trim() : "";
+      const playerScore = coerceScore(member.score).score.toFixed(1);
+      lines.push(pos ? `${member.name} ${pos} ${playerScore}` : `${member.name} ${playerScore}`);
+    });
     lines.push("");
   });
   return lines.join("\n");
@@ -133,8 +239,8 @@ export function buildClipboardPlayers(players) {
   return (players || [])
     .map((player) => {
       const name = (player.name || "").trim();
-      const pos1 = (player.pos1 || "").trim();
-      const score = Number.isFinite(Number(player.score)) ? Number(player.score) : 5;
+      const pos1 = normalizePosition(player.pos1);
+      const score = coerceScore(player.score).score;
       return `${name}\t${pos1}\t${score}`;
     })
     .join("\n");
@@ -142,15 +248,38 @@ export function buildClipboardPlayers(players) {
 
 export function normalizePlayers(rows) {
   return (rows || [])
-    .map((row) => {
-      return {
-        ...row,
-        name: (row.name || "").trim(),
-        pos1: (row.pos1 || "").trim(),
-        score: Number.isFinite(Number(row.score)) ? Number(row.score) : 5,
-      };
-    })
+    .map((row) => ({
+      ...row,
+      name: (row.name || "").trim(),
+      pos1: normalizePosition(row.pos1),
+      score: coerceScore(row.score).score,
+    }))
     .filter((row) => row.name);
+}
+
+/** Problems worth telling the organizer about before they read the teams. */
+export function collectRosterWarnings(rows) {
+  const warnings = [];
+  const clamped = [];
+  const blank = [];
+  const seen = new Map();
+  const duplicates = new Set();
+
+  (rows || []).forEach((row) => {
+    const name = (row.name || "").trim();
+    if (!name) return;
+    const { status } = coerceScore(row.score);
+    if (status === "clamped") clamped.push(name);
+    if (status === "default" && row.score !== undefined) blank.push(name);
+    const key = normalizeNameKey(name);
+    if (seen.has(key)) duplicates.add(seen.get(key));
+    else seen.set(key, name);
+  });
+
+  if (clamped.length) warnings.push({ code: "scoreClamped", names: clamped });
+  if (blank.length) warnings.push({ code: "scoreMissing", names: blank });
+  if (duplicates.size) warnings.push({ code: "duplicateNames", names: [...duplicates] });
+  return warnings;
 }
 
 function collectPositions(rows) {
@@ -161,14 +290,18 @@ function collectPositions(rows) {
   return Array.from(set).sort();
 }
 
-function emptyResult(message) {
+function emptyResult(message, code = null, params = {}) {
   return {
     error: message,
+    errorCode: code,
+    errorParams: params,
+    warnings: [],
     teams: [],
     targets: [],
     allPos: [],
     subs: [],
     used: 0,
+    spread: 0,
   };
 }
 
@@ -177,42 +310,82 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     numTeams = 0,
     teamSize = 0,
     seed = "",
-    posWeight = 2,
+    posWeight = 1,
     scoreWeight = 1,
+    seedTopPlayers = true,
   } = options;
 
-  if (numTeams < 1 || teamSize < 1) {
-    return emptyResult("Set teams and size.");
+  if (numTeams === "" || teamSize === "" || numTeams < 1 || teamSize < 1) {
+    return emptyResult("Set teams and size.", "setTeamsAndSize");
+  }
+  if (!Number.isInteger(numTeams) || !Number.isInteger(teamSize)) {
+    return emptyResult(
+      "Teams and size must be whole numbers.",
+      "wholeNumbers"
+    );
   }
 
   const rows = normalizePlayers(players);
+  const warnings = collectRosterWarnings(players);
   const needed = numTeams * teamSize;
   if (rows.length < needed) {
-    return emptyResult(`Need ${needed} players, have ${rows.length}.`);
+    return emptyResult(`Need ${needed} players, have ${rows.length}.`, "needPlayers", {
+      needed,
+      have: rows.length,
+    });
   }
 
-  const orderedAll = seededShuffle(
-    [...rows].sort(
-      (a, b) => b.score - a.score || a.name.localeCompare(b.name)
-    ),
-    seed
-  );
-  const pool = orderedAll.slice(0, needed);
-  const bench = orderedAll.slice(needed);
+  // ---- Lock -------------------------------------------------------------
+  const lockRequested = Boolean(lockedTeam);
+  const activeLock =
+    lockedTeam &&
+    Number.isInteger(lockedTeam.index) &&
+    lockedTeam.index >= 0 &&
+    lockedTeam.index < numTeams
+      ? lockedTeam
+      : null;
+  if (lockRequested && !activeLock) warnings.push({ code: "lockIgnored" });
 
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const requestedLockIds = activeLock ? [...new Set(activeLock.members || [])] : [];
+  const lockedMembers = requestedLockIds.map((id) => byId.get(id)).filter(Boolean);
+  const missingLocked = requestedLockIds.length - lockedMembers.length;
+  if (missingLocked > 0) warnings.push({ code: "lockedMissing", count: missingLocked });
+
+  if (lockedMembers.length > teamSize) {
+    return emptyResult("Locked team exceeds team size.", "lockedTooBig");
+  }
+  const lockedIds = new Set(lockedMembers.map((member) => member.id));
+
+  // ---- Who plays --------------------------------------------------------
+  // Locked players always play; without this, reshuffling silently benches
+  // them and quietly dissolves the lock. Everyone else is drawn at random.
+  const pool = [...lockedMembers];
+  for (const row of seededShuffle(rows, seed)) {
+    if (pool.length >= needed) break;
+    if (!lockedIds.has(row.id)) pool.push(row);
+  }
+  const poolIds = new Set(pool.map((player) => player.id));
+  const bench = rows.filter((row) => !poolIds.has(row.id));
+
+  // ---- Position targets -------------------------------------------------
   const allPos = collectPositions(pool);
   const posCounts = Object.fromEntries(allPos.map((pos) => [pos, 0]));
   pool.forEach((player) => {
-    if (player.pos1) posCounts[player.pos1] = (posCounts[player.pos1] || 0) + 1;
+    if (player.pos1) posCounts[player.pos1] += 1;
   });
 
+  // Fractional ideal, so the objective does not care *which* team gets the
+  // spare player of a position that does not divide evenly.
+  const idealPos = Object.fromEntries(
+    allPos.map((pos) => [pos, posCounts[pos] / numTeams])
+  );
   const targets = Array.from({ length: numTeams }, () => ({}));
   for (const pos of allPos) {
-    const total = posCounts[pos] || 0;
-    const base = Math.floor(total / numTeams);
-    let remainder = total % numTeams;
-    for (let teamIndex = 0; teamIndex < numTeams; teamIndex += 1) {
-      targets[teamIndex][pos] = base + (teamIndex < remainder ? 1 : 0);
+    const base = Math.floor(posCounts[pos] / numTeams);
+    const remainder = posCounts[pos] % numTeams;
+    for (let i = 0; i < numTeams; i += 1) {
+      targets[i][pos] = base + (i < remainder ? 1 : 0);
     }
   }
 
@@ -224,256 +397,332 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     index,
   }));
 
-  const avgScore =
+  const targetTeamTotal =
     pool.reduce((sum, player) => sum + player.score, 0) / numTeams;
 
-  const activeLock =
-    lockedTeam &&
-    Number.isInteger(lockedTeam.index) &&
-    lockedTeam.index < numTeams
-      ? lockedTeam
-      : null;
-
-  const lockedMembers = activeLock
-    ? activeLock.members
-        .map((id) => pool.find((player) => player.id === id))
-        .filter(Boolean)
-    : [];
-
-  if (lockedMembers.length > teamSize) {
-    return emptyResult("Locked team exceeds team size.");
+  function addMember(team, player) {
+    team.members.push(player);
+    team.score += player.score;
+    if (player.pos1) team.pos[player.pos1] = (team.pos[player.pos1] || 0) + 1;
   }
 
-  const lockedMap = new Map(lockedMembers.map((player) => [player.id, true]));
+  lockedMembers.forEach((member) => addMember(teams[activeLock.index], member));
 
-  lockedMembers.forEach((member) => {
-    const team = teams[activeLock.index];
-    team.members.push(member);
-    team.score += member.score;
-    if (member.pos1) {
-      team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
-    }
-  });
+  // ---- Seeding rule -----------------------------------------------------
+  // The `numTeams` highest-rated players in the pool are spread one per team,
+  // so the strongest players can never stack up on one side.
+  const ranked = [...pool].sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.name.localeCompare(b.name) ||
+      String(a.id).localeCompare(String(b.id))
+  );
+  const seedIds = new Set(
+    seedTopPlayers ? ranked.slice(0, numTeams).map((player) => player.id) : []
+  );
 
-  const remaining = pool.filter((player) => !lockedMap.has(player.id));
+  const teamHasSeed = teams.map((team) =>
+    team.members.some((member) => seedIds.has(member.id))
+  );
+  const activeSeedIds = new Set(
+    lockedMembers.filter((member) => seedIds.has(member.id)).map((m) => m.id)
+  );
+
+  // Shuffle which open team receives which seed so reshuffling changes the
+  // pairings; improveBalance() may still swap seeds between teams afterwards.
+  const openTeamOrder = seededShuffle(
+    teams.map((_, index) => index).filter((index) => !teamHasSeed[index]),
+    seed
+  );
+  for (const player of ranked) {
+    if (!seedIds.has(player.id) || lockedIds.has(player.id)) continue;
+    const target = openTeamOrder.find(
+      (index) => !teamHasSeed[index] && teams[index].members.length < teamSize
+    );
+    if (target === undefined) break;
+    addMember(teams[target], player);
+    teamHasSeed[target] = true;
+    activeSeedIds.add(player.id);
+  }
+  if (seedTopPlayers && teamHasSeed.some((has) => !has)) {
+    warnings.push({ code: "seedRuleRelaxed" });
+  }
+
+  // ---- Greedy fill ------------------------------------------------------
+  const placed = new Set([...lockedIds, ...activeSeedIds]);
+  const remaining = pool.filter((player) => !placed.has(player.id));
+
+  function positionDelta(team, pos, change) {
+    if (!pos || !posWeight) return 0;
+    const ideal = idealPos[pos] || 0;
+    const have = team.pos[pos] || 0;
+    return ((have + change - ideal) ** 2 - (have - ideal) ** 2) * posWeight;
+  }
 
   function penalty(team, candidate) {
-    let total = 0;
-
-    const targetCount = targets[team.index]?.[candidate.pos1] || 0;
-    const current = targetCount
-      ? (team.pos[candidate.pos1] || 0) / targetCount
-      : 0;
-    total += current * posWeight;
-
-    // Use quadratic penalty on total team score vs the proportional target.
-    // This heavily penalizes large score discrepancies between teams.
-    const projectedTotal = team.score + candidate.score;
-    const partialTarget = avgScore * (team.members.length + 1) / teamSize;
-    const diff = projectedTotal - partialTarget;
-    total += diff * diff * scoreWeight;
-
-    return total;
+    const projected = team.score + candidate.score;
+    const partialTarget = (targetTeamTotal * (team.members.length + 1)) / teamSize;
+    const diff = projected - partialTarget;
+    return diff * diff * scoreWeight + positionDelta(team, candidate.pos1, 1);
   }
 
-  const teamOrder = teams.map((team, idx) => ({ team, idx }));
-
-  remaining.forEach((candidate) => {
-    const eligible = teamOrder.filter(
-      ({ team }) => team.members.length < teamSize
-    );
-
-    if (eligible.length === 0) {
-      throw new Error("No team can accept more players.");
+  for (const candidate of remaining) {
+    // Fill the emptiest teams first, so nobody is left with a forced placement.
+    const open = teams.filter((team) => team.members.length < teamSize);
+    if (open.length === 0) {
+      return emptyResult("Could not place every player.", "internal");
     }
+    const minCount = Math.min(...open.map((team) => team.members.length));
+    const eligible = open.filter((team) => team.members.length === minCount);
 
     let best = eligible[0];
     let bestPenalty = Infinity;
-
-    eligible.forEach(({ team, idx }) => {
-      team.index = idx;
+    for (const team of eligible) {
       const pen = penalty(team, candidate);
       if (pen < bestPenalty) {
         bestPenalty = pen;
-        best = { team, idx };
+        best = team;
       }
-    });
-
-    const targetTeam = best.team;
-    targetTeam.members.push(candidate);
-    targetTeam.score += candidate.score;
-    if (candidate.pos1) {
-      targetTeam.pos[candidate.pos1] =
-        (targetTeam.pos[candidate.pos1] || 0) + 1;
     }
-  });
+    addMember(best, candidate);
+  }
 
-  // HARD INVARIANT: exact size
-  teams.forEach((team) => {
+  for (const team of teams) {
     if (team.members.length !== teamSize) {
-      throw new Error(
-        `${team.name} has ${team.members.length}, expected ${teamSize}`
-      );
+      return emptyResult("Could not place every player.", "internal");
     }
-  });
+  }
 
-  // Post-processing: iteratively swap non-locked players between teams to
-  // minimize the maximum total-score difference between any two teams.
-  function improveBalance() {
-    let improved = true;
-    while (improved) {
-      improved = false;
-      const scores = teams.map((t) => t.score);
-      const maxDiff = Math.max(...scores) - Math.min(...scores);
-      if (maxDiff === 0) break;
+  // ---- Local search on the real objective -------------------------------
+  // Score imbalance AND position imbalance, so the swap phase can no longer
+  // undo the positional work done above.
+  function swapDelta(teamA, teamB, playerA, playerB) {
+    const nextA = teamA.score - playerA.score + playerB.score;
+    const nextB = teamB.score - playerB.score + playerA.score;
+    let delta =
+      ((nextA - targetTeamTotal) ** 2 +
+        (nextB - targetTeamTotal) ** 2 -
+        (teamA.score - targetTeamTotal) ** 2 -
+        (teamB.score - targetTeamTotal) ** 2) *
+      scoreWeight;
 
-      for (let i = 0; i < teams.length && !improved; i += 1) {
-        for (let j = i + 1; j < teams.length && !improved; j += 1) {
-          const ti = teams[i];
-          const tj = teams[j];
-          for (let pi = 0; pi < ti.members.length && !improved; pi += 1) {
-            const playerI = ti.members[pi];
-            if (lockedMap.has(playerI.id)) continue;
-            for (let pj = 0; pj < tj.members.length && !improved; pj += 1) {
-              const playerJ = tj.members[pj];
-              if (lockedMap.has(playerJ.id)) continue;
-              const ni = ti.score - playerI.score + playerJ.score;
-              const nj = tj.score - playerJ.score + playerI.score;
-              // Compute new max-diff without allocating a new array.
-              let newMax = -Infinity;
-              let newMin = Infinity;
-              for (let k = 0; k < scores.length; k += 1) {
-                const s = k === i ? ni : k === j ? nj : scores[k];
-                if (s > newMax) newMax = s;
-                if (s < newMin) newMin = s;
-              }
-              if (newMax - newMin < maxDiff) {
-                ti.members[pi] = playerJ;
-                ti.score = ni;
-                tj.members[pj] = playerI;
-                tj.score = nj;
-                improved = true;
-              }
+    if (playerA.pos1 !== playerB.pos1) {
+      delta +=
+        positionDelta(teamA, playerA.pos1, -1) +
+        positionDelta(teamA, playerB.pos1, 1) +
+        positionDelta(teamB, playerB.pos1, -1) +
+        positionDelta(teamB, playerA.pos1, 1);
+    }
+    return delta;
+  }
+
+  // A seeded player may only trade places with another seeded player, or the
+  // one-per-team rule would be undone here.
+  const movable = (player) => !lockedIds.has(player.id);
+  const sameRole = (a, b) => activeSeedIds.has(a.id) === activeSeedIds.has(b.id);
+
+  const EPSILON = 1e-9;
+  const MAX_PASSES = 100;
+  for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+    let best = null;
+    let bestDelta = -EPSILON;
+
+    for (let i = 0; i < teams.length; i += 1) {
+      for (let j = i + 1; j < teams.length; j += 1) {
+        for (let a = 0; a < teams[i].members.length; a += 1) {
+          const playerA = teams[i].members[a];
+          if (!movable(playerA)) continue;
+          for (let b = 0; b < teams[j].members.length; b += 1) {
+            const playerB = teams[j].members[b];
+            if (!movable(playerB) || !sameRole(playerA, playerB)) continue;
+            const delta = swapDelta(teams[i], teams[j], playerA, playerB);
+            if (delta < bestDelta) {
+              bestDelta = delta;
+              best = { i, j, a, b };
             }
           }
         }
       }
     }
 
-    // Recalculate position tracking to reflect any swaps.
-    teams.forEach((team) => {
-      team.pos = {};
-      team.members.forEach((member) => {
-        if (member.pos1) {
-          team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
+    if (!best) break;
+    const teamA = teams[best.i];
+    const teamB = teams[best.j];
+    const playerA = teamA.members[best.a];
+    const playerB = teamB.members[best.b];
+    teamA.members[best.a] = playerB;
+    teamB.members[best.b] = playerA;
+    teamA.score += playerB.score - playerA.score;
+    teamB.score += playerA.score - playerB.score;
+    if (playerA.pos1) teamA.pos[playerA.pos1] -= 1;
+    if (playerB.pos1) teamA.pos[playerB.pos1] = (teamA.pos[playerB.pos1] || 0) + 1;
+    if (playerB.pos1) teamB.pos[playerB.pos1] -= 1;
+    if (playerA.pos1) teamB.pos[playerA.pos1] = (teamB.pos[playerA.pos1] || 0) + 1;
+  }
+
+  // Recompute from members so accumulated float error never reaches the UI.
+  teams.forEach((team) => {
+    team.score = team.members.reduce((sum, member) => sum + member.score, 0);
+    team.pos = {};
+    team.members.forEach((member) => {
+      if (member.pos1) team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
+    });
+  });
+
+  const teamScores = teams.map((team) => team.score);
+  const spread = Math.max(...teamScores) - Math.min(...teamScores);
+  if (activeLock && spread > 1.5) {
+    warnings.push({ code: "lockedImbalance", spread: Number(spread.toFixed(1)) });
+  }
+
+  const unevenPositions = allPos.filter((pos) => {
+    const counts = teams.map((team) => team.pos[pos] || 0);
+    return Math.max(...counts) - Math.min(...counts) > 1;
+  });
+  if (unevenPositions.length) {
+    warnings.push({ code: "positionsUneven", positions: unevenPositions });
+  }
+
+  // ---- Subs -------------------------------------------------------------
+  // Round-robin by sub count first, so no team ends up with two extra players
+  // while another has none.
+  const subs = teams.map((team) => ({ teamName: team.name, players: [], score: 0 }));
+  [...bench]
+    .sort((a, b) => b.score - a.score)
+    .forEach((player) => {
+      let target = 0;
+      let bestKey = null;
+      subs.forEach((group, index) => {
+        const key = [group.players.length, teams[index].score + group.score];
+        if (
+          bestKey === null ||
+          key[0] < bestKey[0] ||
+          (key[0] === bestKey[0] && key[1] < bestKey[1])
+        ) {
+          bestKey = key;
+          target = index;
         }
       });
+      subs[target].players.push(player);
+      subs[target].score += player.score;
     });
-  }
-  improveBalance();
-
-  const subs = teams.map((team) => ({
-    teamName: team.name,
-    players: [],
-    score: 0,
-  }));
-
-  bench.forEach((player) => {
-    let targetIndex = 0;
-    let bestScore = Infinity;
-    subs.forEach((group, idx) => {
-      const projected = teams[idx].score + group.score + player.score;
-      if (projected < bestScore) {
-        bestScore = projected;
-        targetIndex = idx;
-      }
-    });
-    const targetGroup = subs[targetIndex];
-    targetGroup.players.push(player);
-    targetGroup.score += player.score;
-  });
 
   return {
     error: null,
+    errorCode: null,
+    errorParams: {},
+    warnings,
     teams: teams.map(({ index, ...rest }) => rest),
     targets,
     allPos,
     subs,
     used: pool.length,
+    spread,
+    seededIds: [...activeSeedIds],
   };
 }
 
+// ---------------------------------------------------------------------------
+// Player database (localStorage)
+// ---------------------------------------------------------------------------
+
 const DB_KEY = "futbolDomingos_playerDb";
 
-export function loadPlayerDatabase() {
-  if (typeof localStorage === "undefined") return [];
+/** Drop anything malformed so a corrupted key can never crash the app. */
+export function sanitizeDatabase(db) {
+  if (!Array.isArray(db)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of db) {
+    if (!entry || typeof entry !== "object") continue;
+    const name = String(entry.name ?? "").trim();
+    const key = normalizeNameKey(name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      name,
+      score: coerceScore(entry.score).score,
+      pos1: normalizePosition(entry.pos1),
+    });
+  }
+  return out;
+}
+
+/**
+ * Reading the `localStorage` property itself throws in a sandboxed frame or
+ * when the browser is set to block site data, so even the existence check has
+ * to sit inside the try.
+ */
+function getStorage() {
   try {
-    const raw = localStorage.getItem(DB_KEY);
-    return raw ? JSON.parse(raw) : [];
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function loadPlayerDatabase() {
+  const storage = getStorage();
+  if (!storage) return [];
+  try {
+    const raw = storage.getItem(DB_KEY);
+    return sanitizeDatabase(raw ? JSON.parse(raw) : []);
   } catch {
     return [];
   }
 }
 
 export function savePlayerDatabase(db) {
-  if (typeof localStorage === "undefined") return;
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  const storage = getStorage();
+  if (!storage) return false;
+  try {
+    storage.setItem(DB_KEY, JSON.stringify(sanitizeDatabase(db)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function normalizeName(name) {
-  return (name || "").trim().toLowerCase();
+export function removeFromDatabase(name, db) {
+  const key = normalizeNameKey(name);
+  return sanitizeDatabase(db).filter((entry) => normalizeNameKey(entry.name) !== key);
 }
 
 export function matchPlayersFromDatabase(parsed, db) {
-  return parsed.map((player) => {
-    const key = normalizeName(player.name);
-    const entry = (db || []).find((e) => normalizeName(e.name) === key);
-    if (entry) {
-      return { ...player, score: entry.score, pos1: entry.pos1 };
-    }
-    return player;
+  const clean = sanitizeDatabase(db);
+  const index = new Map(clean.map((entry) => [normalizeNameKey(entry.name), entry]));
+  return (parsed || []).map((player) => {
+    const entry = index.get(normalizeNameKey(player.name));
+    if (!entry) return { ...player, matched: false };
+    const next = { ...player, matched: true };
+    // An explicitly pasted rating beats the stored one; a blank one is filled.
+    if (player.hasScore !== true) next.score = entry.score;
+    if (!normalizePosition(player.pos1)) next.pos1 = entry.pos1;
+    return next;
   });
 }
 
 export function updateDatabase(players, db) {
-  const updated = [...(db || [])];
-  for (const player of players) {
-    const key = normalizeName(player.name);
-    const index = updated.findIndex((e) => normalizeName(e.name) === key);
-    const entry = { name: index >= 0 ? updated[index].name : player.name, score: player.score, pos1: player.pos1 };
-    if (index >= 0) {
-      updated[index] = entry;
-    } else {
+  const updated = sanitizeDatabase(db);
+  const index = new Map(
+    updated.map((entry, i) => [normalizeNameKey(entry.name), i])
+  );
+  for (const player of normalizePlayers(players)) {
+    const key = normalizeNameKey(player.name);
+    if (!key) continue;
+    const at = index.get(key);
+    // Keep the spelling already stored so casing does not churn week to week.
+    const entry = {
+      name: at === undefined ? player.name : updated[at].name,
+      score: player.score,
+      pos1: player.pos1,
+    };
+    if (at === undefined) {
+      index.set(key, updated.length);
       updated.push(entry);
+    } else {
+      updated[at] = entry;
     }
   }
   return updated;
-}
-
-if (typeof console !== "undefined") {
-  const parsed = parseListIgnoreNumbers(
-    "1 Luis Miguel 7.5\n2. Jane Smith 8.0\n3 Carlos"
-  );
-  console.assert(parsed.length === 3, "parseListIgnoreNumbers keeps 3 valid names");
-  console.assert(parsed[0].name === "Luis Miguel", "First name cleaned");
-
-  const shuffled = seededShuffle([1, 2, 3, 4], "x");
-  console.assert(Array.isArray(shuffled) && shuffled.length === 4, "seededShuffle returns array");
-
-  const clip = buildClipboardTeams([
-    { name: "Team 1", members: [{ name: "A", pos1: "D" }, { name: "B", pos1: "M" }] },
-    { name: "Team 2", members: [{ name: "C", pos1: "F" }] },
-  ]);
-  console.assert(
-    clip.includes("Team 1 - White") && !clip.includes("Name Pos") && clip.includes("A D"),
-    "Clipboard base format ok"
-  );
-
-  const clipNoPos = buildClipboardTeams([
-    { name: "Team 3", members: [{ name: "X", pos1: "" }, { name: "Y", pos1: "" }] },
-  ]);
-  console.assert(
-    clipNoPos.includes("Team 3 - White") && clipNoPos.includes("X\nY"),
-    "Clipboard no-pos format ok"
-  );
 }
