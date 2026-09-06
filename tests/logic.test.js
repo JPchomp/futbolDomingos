@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   uid,
+  parseList,
   parseListIgnoreNumbers,
   buildClipboardTeams,
   buildClipboardTeamsWithScores,
@@ -9,6 +10,15 @@ import {
   computeAssignments,
   matchPlayersFromDatabase,
   updateDatabase,
+  removeFromDatabase,
+  sanitizeDatabase,
+  normalizePlayers,
+  collectRosterWarnings,
+  coerceScore,
+  BALANCE_PRESETS,
+  DEFAULT_SCORE,
+  MIN_SCORE,
+  MAX_SCORE,
 } from "../logic.js";
 
 function samplePlayers(count) {
@@ -60,7 +70,8 @@ test("buildClipboardTeams outputs space-separated rows", () => {
   const text = buildClipboardTeams(teams);
   assert.match(text, /Team 1 - White/);
   assert.doesNotMatch(text, /Name Pos/);
-  assert.match(text, /Alice MF/);
+  assert.match(text, /Alice/);
+  assert.doesNotMatch(text, /Alice MF/);
   assert.doesNotMatch(text, /Name,Pos/);
   assert.doesNotMatch(text, /Alice,MF/);
 });
@@ -147,11 +158,11 @@ test("computeAssignments minimizes total score discrepancy between teams", () =>
 });
 
 test("computeAssignments keeps score discrepancy small for 3 teams", () => {
-  // 12 players, scores 1–12, total = 78, optimal split = 26 each.
+  // 12 players, scores 1.0–6.5 in 0.5 steps, total = 45, optimal split = 15 each.
   const players = Array.from({ length: 12 }, (_, i) => ({
     id: String(i + 1),
     name: `Player ${i + 1}`,
-    score: i + 1,
+    score: 1 + i * 0.5,
     pos1: "",
   }));
   const result = computeAssignments(players, {
@@ -165,6 +176,72 @@ test("computeAssignments keeps score discrepancy small for 3 teams", () => {
   const scores = result.teams.map((t) => t.score);
   const maxDiff = Math.max(...scores) - Math.min(...scores);
   assert.ok(maxDiff <= 1, `Score difference ${maxDiff} should be ≤ 1 for scores 1–12 into 3 teams`);
+});
+
+test("computeAssignments balances per-position scores across teams", () => {
+  // 8 players split evenly: 4 DF and 4 MF, each position has scores 10,9,6,5.
+  // Optimal split for each position: both teams get two players totalling 15 each.
+  const players = [
+    { id: "1", name: "DF1", score: 10, pos1: "DF" },
+    { id: "2", name: "DF2", score: 9,  pos1: "DF" },
+    { id: "3", name: "DF3", score: 6,  pos1: "DF" },
+    { id: "4", name: "DF4", score: 5,  pos1: "DF" },
+    { id: "5", name: "MF1", score: 10, pos1: "MF" },
+    { id: "6", name: "MF2", score: 9,  pos1: "MF" },
+    { id: "7", name: "MF3", score: 6,  pos1: "MF" },
+    { id: "8", name: "MF4", score: 5,  pos1: "MF" },
+  ];
+  const result = computeAssignments(players, {
+    numTeams: 2,
+    teamSize: 4,
+    seed: "",
+    posWeight: 5,
+    scoreWeight: 1,
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.teams.length, 2);
+  // Each team should have posScore close to 15 for DF and 15 for MF.
+  result.teams.forEach((team) => {
+    assert.ok(team.posScore !== undefined, "team.posScore should be defined");
+  });
+  const dfScores = result.teams.map((t) => t.posScore?.DF || 0);
+  const mfScores = result.teams.map((t) => t.posScore?.MF || 0);
+  const dfDiff = Math.abs(dfScores[0] - dfScores[1]);
+  const mfDiff = Math.abs(mfScores[0] - mfScores[1]);
+  assert.ok(dfDiff <= 1, `DF score difference ${dfDiff} should be ≤ 1`);
+  assert.ok(mfDiff <= 1, `MF score difference ${mfDiff} should be ≤ 1`);
+});
+
+test("computeAssignments does not crash with only one player of a position across many teams", () => {
+  // 1 GK for 4 teams — the GK cannot be distributed evenly, but the algorithm must not crash.
+  const players = [
+    { id: "1",  name: "GK1",  score: 8, pos1: "GK" },
+    ...Array.from({ length: 15 }, (_, i) => ({
+      id: String(i + 2),
+      name: `DF${i + 1}`,
+      score: 5 + (i % 4),
+      pos1: "DF",
+    })),
+  ];
+  let result;
+  assert.doesNotThrow(() => {
+    result = computeAssignments(players, {
+      numTeams: 4,
+      teamSize: 4,
+      seed: "edge",
+      posWeight: 5,
+      scoreWeight: 1,
+    });
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.teams.length, 4);
+  result.teams.forEach((team) => {
+    assert.equal(team.members.length, 4);
+    assert.ok(team.posScore !== undefined, "team.posScore should be defined");
+  });
+  // The single GK must end up on exactly one team.
+  const gkCounts = result.teams.map((t) => t.members.filter((m) => m.pos1 === "GK").length);
+  assert.equal(gkCounts.reduce((a, b) => a + b, 0), 1, "Exactly 1 GK across all teams");
 });
 
 test("buildClipboardPlayers outputs tab-delimited rows with name, pos, score", () => {
@@ -267,4 +344,461 @@ test("updateDatabase is case-insensitive when matching existing entries", () => 
   assert.equal(result.length, 1);
   assert.equal(result[0].score, 6);
   assert.equal(result[0].pos1, "FW");
+});
+
+// ---------------------------------------------------------------------------
+// Input validation — these used to throw out of render and blank the app.
+// ---------------------------------------------------------------------------
+
+test("computeAssignments returns an error instead of throwing on a fractional team size", () => {
+  const players = samplePlayers(10);
+  const result = computeAssignments(players, { numTeams: 2, teamSize: 2.5, seed: "s" });
+  assert.equal(result.errorCode, "wholeNumbers");
+  assert.deepEqual(result.teams, []);
+});
+
+test("computeAssignments returns an error instead of throwing on a fractional team count", () => {
+  const players = samplePlayers(10);
+  const result = computeAssignments(players, { numTeams: 2.5, teamSize: 2, seed: "s" });
+  assert.equal(result.errorCode, "wholeNumbers");
+});
+
+test("computeAssignments tolerates a duplicated id in the lock", () => {
+  const players = samplePlayers(10);
+  const locked = { index: 0, members: [players[0].id, players[0].id, players[1].id] };
+  const result = computeAssignments(players, { numTeams: 2, teamSize: 5, seed: "s" }, locked);
+  assert.equal(result.error, null);
+  result.teams.forEach((team) => assert.equal(team.members.length, 5));
+});
+
+test("computeAssignments reports a lock aimed at a team that no longer exists", () => {
+  const players = samplePlayers(10);
+  const locked = { index: 3, members: [players[0].id] };
+  const result = computeAssignments(players, { numTeams: 2, teamSize: 5, seed: "s" }, locked);
+  assert.equal(result.error, null);
+  assert.ok(result.warnings.some((w) => w.code === "lockIgnored"));
+});
+
+// ---------------------------------------------------------------------------
+// Seeding rule: the top `numTeams` players go one per team.
+// ---------------------------------------------------------------------------
+
+test("the highest-rated players are spread one per team", () => {
+  const players = [
+    { id: "s1", name: "Star A", score: 10, pos1: "" },
+    { id: "s2", name: "Star B", score: 9.5, pos1: "" },
+    { id: "s3", name: "Star C", score: 9, pos1: "" },
+    ...Array.from({ length: 9 }, (_, i) => ({
+      id: `r${i}`,
+      name: `Rest ${i}`,
+      score: 4,
+      pos1: "",
+    })),
+  ];
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const result = computeAssignments(players, {
+      numTeams: 3,
+      teamSize: 4,
+      seed: `seed-${attempt}`,
+    });
+    assert.equal(result.error, null);
+    result.teams.forEach((team) => {
+      const stars = team.members.filter((m) => m.id.startsWith("s")).length;
+      assert.equal(stars, 1, `every team gets exactly one of the top 3 (attempt ${attempt})`);
+    });
+  }
+});
+
+test("seeding can be turned off", () => {
+  const players = Array.from({ length: 8 }, (_, i) => ({
+    id: `p${i}`,
+    name: `P${i}`,
+    score: 10,
+    pos1: "",
+  }));
+  const result = computeAssignments(players, {
+    numTeams: 2,
+    teamSize: 4,
+    seed: "x",
+    seedTopPlayers: false,
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.seededIds.length, 0);
+});
+
+test("the seeding rule survives the balancing swaps", () => {
+  // Star scores differ enough that a score-only swap phase would happily move
+  // them onto the same team to level the totals.
+  const players = [
+    { id: "s1", name: "Star A", score: 10, pos1: "" },
+    { id: "s2", name: "Star B", score: 6, pos1: "" },
+    { id: "a", name: "A", score: 5, pos1: "" },
+    { id: "b", name: "B", score: 5, pos1: "" },
+    { id: "c", name: "C", score: 1, pos1: "" },
+    { id: "d", name: "D", score: 1, pos1: "" },
+  ];
+  const result = computeAssignments(players, { numTeams: 2, teamSize: 3, seed: "y" });
+  assert.equal(result.error, null);
+  result.teams.forEach((team) => {
+    assert.equal(team.members.filter((m) => m.id.startsWith("s")).length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Positions survive the balancing phase.
+// ---------------------------------------------------------------------------
+
+test("one goalkeeper per team when there are exactly as many keepers as teams", () => {
+  const roster = [
+    { name: "GK A", score: 6, pos1: "GK" },
+    { name: "GK B", score: 5.5, pos1: "GK" },
+    { name: "GK C", score: 6.5, pos1: "GK" },
+    { name: "GK D", score: 5, pos1: "GK" },
+    ...Array.from({ length: 16 }, (_, i) => ({
+      name: `Field ${i}`,
+      score: 3 + ((i * 0.37) % 6),
+      pos1: "FL",
+    })),
+  ];
+  let correct = 0;
+  const attempts = 60;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const players = roster.map((row, i) => ({ ...row, id: `p${i}` }));
+    const result = computeAssignments(players, {
+      numTeams: 4,
+      teamSize: 5,
+      seed: `gk-${attempt}`,
+      posWeight: 1,
+      scoreWeight: 1,
+    });
+    assert.equal(result.error, null);
+    const counts = result.teams.map((t) => t.members.filter((m) => m.pos1 === "GK").length);
+    if (counts.every((c) => c === 1)) correct += 1;
+  }
+  // Before the fix this sat at roughly 25%.
+  assert.ok(
+    correct / attempts >= 0.9,
+    `expected at least 90% of runs to give every team a keeper, got ${correct}/${attempts}`
+  );
+});
+
+test("position counts are tracked case-insensitively", () => {
+  const players = [
+    { id: "1", name: "A", score: 5, pos1: "gk" },
+    { id: "2", name: "B", score: 5, pos1: "GK" },
+    { id: "3", name: "C", score: 5, pos1: " Gk " },
+    { id: "4", name: "D", score: 5, pos1: "DF" },
+  ];
+  const result = computeAssignments(players, { numTeams: 2, teamSize: 2, seed: "" });
+  assert.equal(result.error, null);
+  assert.deepEqual(result.allPos, ["DF", "GK"]);
+});
+
+// ---------------------------------------------------------------------------
+// The lock actually holds.
+// ---------------------------------------------------------------------------
+
+test("locked players always make the field, even when reshuffled", () => {
+  const players = Array.from({ length: 12 }, (_, i) => ({
+    id: `p${i}`,
+    name: `P${i}`,
+    score: 5 + (i % 4),
+    pos1: "",
+  }));
+  const locked = { index: 0, members: ["p0", "p1", "p2", "p3", "p4"] };
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const result = computeAssignments(
+      players,
+      { numTeams: 2, teamSize: 5, seed: `shuffle-${attempt}` },
+      locked
+    );
+    assert.equal(result.error, null);
+    const ids = result.teams[0].members.map((m) => m.id);
+    locked.members.forEach((id) =>
+      assert.ok(ids.includes(id), `${id} kept on attempt ${attempt}`)
+    );
+  }
+});
+
+test("a lock referring to deleted players is reported, not silently shrunk", () => {
+  const players = Array.from({ length: 10 }, (_, i) => ({
+    id: `p${i}`,
+    name: `P${i}`,
+    score: 5,
+    pos1: "",
+  }));
+  const result = computeAssignments(
+    players,
+    { numTeams: 2, teamSize: 5, seed: "s" },
+    { index: 0, members: ["ghost-1", "ghost-2", "p0"] }
+  );
+  assert.equal(result.error, null);
+  const warning = result.warnings.find((w) => w.code === "lockedMissing");
+  assert.ok(warning);
+  assert.equal(warning.count, 2);
+});
+
+test("locking a stacked team warns about the resulting imbalance", () => {
+  const players = [
+    ...Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, name: `S${i}`, score: 10, pos1: "" })),
+    ...Array.from({ length: 5 }, (_, i) => ({ id: `w${i}`, name: `W${i}`, score: 2, pos1: "" })),
+  ];
+  const result = computeAssignments(
+    players,
+    { numTeams: 2, teamSize: 5, seed: "s" },
+    { index: 0, members: ["s0", "s1", "s2", "s3", "s4"] }
+  );
+  assert.equal(result.error, null);
+  assert.ok(result.warnings.some((w) => w.code === "lockedImbalance"));
+});
+
+// ---------------------------------------------------------------------------
+// Subs are shared out evenly.
+// ---------------------------------------------------------------------------
+
+test("subs never differ by more than one per team", () => {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const players = Array.from({ length: 17 }, (_, i) => ({
+      id: `p${i}`,
+      name: `P${i}`,
+      score: 3 + ((i * 1.7) % 6),
+      pos1: "",
+    }));
+    const result = computeAssignments(players, {
+      numTeams: 3,
+      teamSize: 5,
+      seed: `subs-${attempt}`,
+    });
+    assert.equal(result.error, null);
+    const counts = result.subs.map((s) => s.players.length);
+    assert.ok(
+      Math.max(...counts) - Math.min(...counts) <= 1,
+      `sub counts ${counts} should differ by at most 1`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Score handling.
+// ---------------------------------------------------------------------------
+
+test("a blank score falls back to the default, not zero", () => {
+  assert.equal(coerceScore("").score, DEFAULT_SCORE);
+  assert.equal(coerceScore("   ").score, DEFAULT_SCORE);
+  assert.equal(coerceScore(null).score, DEFAULT_SCORE);
+  assert.equal(coerceScore(undefined).score, DEFAULT_SCORE);
+  assert.equal(normalizePlayers([{ name: "X", score: "" }])[0].score, DEFAULT_SCORE);
+});
+
+test("scores are clamped to the rating scale", () => {
+  assert.equal(coerceScore(999999).score, MAX_SCORE);
+  assert.equal(coerceScore(-3).score, MIN_SCORE);
+  assert.equal(coerceScore(999999).status, "clamped");
+});
+
+test("out-of-range trailing numbers are not treated as ratings", () => {
+  const { players, warnings } = parseList("Juan 0612345678\nPedro 85\nAna 8.5");
+  assert.equal(players[0].name, "Juan");
+  assert.equal(players[0].score, DEFAULT_SCORE);
+  assert.equal(players[0].hasScore, false);
+  assert.equal(players[1].name, "Pedro");
+  assert.equal(players[1].score, DEFAULT_SCORE);
+  assert.equal(players[2].name, "Ana");
+  assert.equal(players[2].score, 8.5);
+  assert.ok(warnings.some((w) => w.code === "scoreOutOfRange"));
+});
+
+test("a negative trailing number is rejected rather than silently made positive", () => {
+  const players = parseListIgnoreNumbers("Bad -3");
+  assert.equal(players[0].name, "Bad");
+  assert.equal(players[0].score, DEFAULT_SCORE);
+});
+
+test("a trailing period does not become part of the name", () => {
+  const players = parseListIgnoreNumbers("Ana 7.");
+  assert.equal(players[0].name, "Ana");
+  assert.equal(players[0].score, 7);
+});
+
+test("clamped and blank scores are reported", () => {
+  const warnings = collectRosterWarnings([
+    { name: "High", score: 50 },
+    { name: "Blank", score: "" },
+    { name: "Fine", score: 6 },
+  ]);
+  assert.ok(warnings.some((w) => w.code === "scoreClamped" && w.names.includes("High")));
+  assert.ok(warnings.some((w) => w.code === "scoreMissing" && w.names.includes("Blank")));
+});
+
+test("duplicate names are reported", () => {
+  const warnings = collectRosterWarnings([
+    { name: "Juan", score: 8 },
+    { name: "juan", score: 3 },
+  ]);
+  assert.ok(warnings.some((w) => w.code === "duplicateNames"));
+});
+
+// ---------------------------------------------------------------------------
+// Clipboard round-trips.
+// ---------------------------------------------------------------------------
+
+test("copy-teams-with-scores round-trips back into players", () => {
+  const teams = [
+    {
+      name: "Team 1",
+      score: 15,
+      members: [
+        { id: "a", name: "Juan", pos1: "GK", score: 7.5 },
+        { id: "b", name: "Ana", pos1: "DF", score: 7.5 },
+      ],
+    },
+    {
+      name: "Team 2",
+      score: 6,
+      members: [{ id: "c", name: "Pedro", pos1: "MF", score: 6 }],
+    },
+  ];
+  const parsed = parseListIgnoreNumbers(buildClipboardTeamsWithScores(teams));
+  assert.equal(parsed.length, 3);
+  assert.deepEqual(
+    parsed.map((p) => [p.name, p.pos1, p.score]),
+    [
+      ["Juan", "GK", 7.5],
+      ["Ana", "DF", 7.5],
+      ["Pedro", "MF", 6],
+    ]
+  );
+});
+
+test("copy-teams round-trips names, and deliberately drops positions", () => {
+  // "Copy teams" is the plain list meant for a chat message, so it carries no
+  // positions. "Copy teams with scores" is the one that round-trips fully.
+  const teams = [
+    {
+      name: "Team 1",
+      members: [
+        { id: "a", name: "Juan", pos1: "GK" },
+        { id: "b", name: "Ana Maria", pos1: "DF" },
+      ],
+    },
+  ];
+  const text = buildClipboardTeams(teams);
+  assert.doesNotMatch(text, /GK/);
+  const parsed = parseListIgnoreNumbers(text);
+  assert.deepEqual(
+    parsed.map((p) => [p.name, p.pos1]),
+    [
+      ["Juan", ""],
+      ["Ana Maria", ""],
+    ]
+  );
+});
+
+test("a single-letter trailing token is kept as part of the name", () => {
+  const players = parseListIgnoreNumbers("Juan A 7");
+  assert.equal(players[0].name, "Juan A");
+  assert.equal(players[0].pos1, "");
+});
+
+// ---------------------------------------------------------------------------
+// Database.
+// ---------------------------------------------------------------------------
+
+test("database matching ignores accents and repeated spaces", () => {
+  const db = [{ name: "José Muñoz", score: 8.5, pos1: "FW" }];
+  const parsed = parseListIgnoreNumbers("Jose Munoz\nJosé  Muñoz");
+  const result = matchPlayersFromDatabase(parsed, db);
+  assert.equal(result[0].score, 8.5);
+  assert.equal(result[1].score, 8.5);
+});
+
+test("an explicitly pasted score beats the stored one", () => {
+  const db = [{ name: "Juan", score: 3, pos1: "GK" }];
+  const [player] = matchPlayersFromDatabase(parseListIgnoreNumbers("Juan 9"), db);
+  assert.equal(player.score, 9);
+  assert.equal(player.pos1, "GK", "a position the paste did not supply is still filled in");
+});
+
+test("a database match does not overwrite a position typed by hand", () => {
+  const db = [{ name: "Juan", score: 7, pos1: "GK" }];
+  const [player] = matchPlayersFromDatabase([{ id: "1", name: "Juan", pos1: "DF" }], db);
+  assert.equal(player.pos1, "DF");
+  assert.equal(player.score, 7);
+});
+
+test("a database entry missing fields does not strip the player", () => {
+  const [player] = matchPlayersFromDatabase(
+    [{ id: "1", name: "Juan", score: 9, pos1: "FW" }],
+    [{ name: "Juan" }]
+  );
+  assert.equal(player.pos1, "FW");
+  assert.ok(Number.isFinite(player.score));
+});
+
+test("a corrupted database shape does not throw", () => {
+  assert.deepEqual(sanitizeDatabase({}), []);
+  assert.deepEqual(sanitizeDatabase("junk"), []);
+  assert.deepEqual(sanitizeDatabase(null), []);
+  assert.deepEqual(matchPlayersFromDatabase([{ id: "1", name: "a" }], {}), [
+    { id: "1", name: "a", matched: false },
+  ]);
+  assert.deepEqual(sanitizeDatabase([{ name: "Juan", score: "oops" }]), [
+    { name: "Juan", score: DEFAULT_SCORE, pos1: "" },
+  ]);
+});
+
+test("uploading a cleared score stores the default, not zero", () => {
+  const db = updateDatabase([{ name: "Juan", score: "" }], []);
+  assert.equal(db[0].score, DEFAULT_SCORE);
+});
+
+test("removeFromDatabase drops one entry by name", () => {
+  const db = [
+    { name: "Juan", score: 7, pos1: "" },
+    { name: "Ana", score: 8, pos1: "" },
+  ];
+  const result = removeFromDatabase("juan", db);
+  assert.deepEqual(
+    result.map((e) => e.name),
+    ["Ana"]
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Per-position rating balance. Balancing counts alone would let one team take
+// the best keeper and the best striker while the counts still looked even.
+// (See also the two tests above, from copilot/optimize-team-scores-by-position.)
+// ---------------------------------------------------------------------------
+
+
+
+test("per-position ratings stay balanced without disturbing the keeper split", () => {
+  // Two keepers of very different quality plus two strikers: each team should
+  // get one of each, and the better keeper should not land with the better
+  // striker.
+  const players = [
+    { id: "g1", name: "Keeper A", score: 9, pos1: "GK" },
+    { id: "g2", name: "Keeper B", score: 4, pos1: "GK" },
+    { id: "f1", name: "Striker A", score: 9, pos1: "FW" },
+    { id: "f2", name: "Striker B", score: 4, pos1: "FW" },
+  ];
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const result = computeAssignments(players, {
+      numTeams: 2,
+      teamSize: 2,
+      seed: `pair-${attempt}`,
+      ...BALANCE_PRESETS.balanced,
+    });
+    assert.equal(result.error, null);
+    result.teams.forEach((team) => {
+      assert.equal(team.members.filter((m) => m.pos1 === "GK").length, 1);
+      assert.equal(team.members.filter((m) => m.pos1 === "FW").length, 1);
+    });
+    const totals = result.teams.map((team) => team.score);
+    assert.equal(
+      Math.abs(totals[0] - totals[1]),
+      0,
+      "the strong keeper should be paired with the weak striker"
+    );
+  }
 });
