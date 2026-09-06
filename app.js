@@ -244,9 +244,10 @@ function App() {
             </select>
           </label>
         </div>
+        <p class="mt-3 text-xs text-gray-500">${t.balanceHint}</p>
         ${Number.isInteger(numTeams) &&
         numTeams > 1 &&
-        html`<p class="mt-3 text-xs text-gray-500">${t.seedRuleNote(numTeams)}</p>`}
+        html`<p class="mt-1 text-xs text-gray-500">${t.seedRuleNote(numTeams)}</p>`}
       </section>
 
       ${notice && html`

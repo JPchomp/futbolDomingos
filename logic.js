@@ -6,13 +6,14 @@ export const MIN_SCORE = 0;
 export const MAX_SCORE = 10;
 export const DEFAULT_SCORE = 5;
 
-// Preset trade-offs between levelling team totals and spreading positions.
-// The number is roughly "how many points of team-total gap we will accept to
-// give every team one more correctly-placed specialist".
+// Positions are fitted first and ratings are levelled inside that fit, so the
+// only real knob is how wide a rating gap between teams is acceptable before
+// position slots start being given back.
 export const BALANCE_PRESETS = {
-  score: { scoreWeight: 1, posWeight: 0.25, posScoreWeight: 0.05 },
-  balanced: { scoreWeight: 1, posWeight: 1, posScoreWeight: 0.2 },
-  positions: { scoreWeight: 1, posWeight: 4, posScoreWeight: 0.8 },
+  score: { scoreTolerance: 0.25 },
+  balanced: { scoreTolerance: 1 },
+  // Positions are never traded away, however wide the rating gap ends up.
+  positions: { scoreTolerance: Infinity },
 };
 
 export function uid(length = 7) {
@@ -302,9 +303,9 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     numTeams = 0,
     teamSize = 0,
     seed = "",
-    posWeight = 1,
     posScoreWeight = 0.2,
     scoreWeight = 1,
+    scoreTolerance = 1,
     seedTopPlayers = true,
   } = options;
 
@@ -368,10 +369,10 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     if (player.pos1) posCounts[player.pos1] += 1;
   });
 
-  // Fractional ideal, so the objective does not care *which* team gets the
-  // spare player of a position that does not divide evenly.
-  const idealPos = Object.fromEntries(
-    allPos.map((pos) => [pos, posCounts[pos] / numTeams])
+  // A position is "fitted" when every team holds between floor and ceil of its
+  // fair share. Which team gets the spare one does not matter.
+  const posCeil = Object.fromEntries(
+    allPos.map((pos) => [pos, Math.ceil(posCounts[pos] / numTeams)])
   );
 
   // Balancing counts alone would happily give one team the best keeper and the
@@ -467,56 +468,68 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     warnings.push({ code: "seedRuleRelaxed" });
   }
 
-  // ---- Greedy fill ------------------------------------------------------
+  // ---- Construction: rarest positions claim their slots first ----------
   const placed = new Set([...lockedIds, ...activeSeedIds]);
   const remaining = pool.filter((player) => !placed.has(player.id));
 
-  function positionDelta(team, pos, change, score) {
-    if (!pos) return 0;
-    let delta = 0;
-    if (posWeight) {
-      const ideal = idealPos[pos] || 0;
-      const have = team.pos[pos] || 0;
-      delta += ((have + change - ideal) ** 2 - (have - ideal) ** 2) * posWeight;
-    }
-    if (posScoreWeight) {
-      const ideal = idealPosScore[pos] || 0;
-      const have = team.posScore[pos] || 0;
-      const next = have + change * score;
-      delta += ((next - ideal) ** 2 - (have - ideal) ** 2) * posScoreWeight;
-    }
-    return delta;
+  // How far a team is from its fair share of *rating* for one position.
+  // Counts are handled as a constraint; this is purely about quality.
+  function positionScorePenalty(team, pos, score) {
+    if (!posScoreWeight || !pos) return 0;
+    const ideal = idealPosScore[pos] || 0;
+    const have = team.posScore[pos] || 0;
+    return ((have + score - ideal) ** 2 - (have - ideal) ** 2) * posScoreWeight;
   }
 
-  function penalty(team, candidate) {
-    const projected = team.score + candidate.score;
+  function fitPenalty(team, candidate) {
     const partialTarget = (targetTeamTotal * (team.members.length + 1)) / teamSize;
-    const diff = projected - partialTarget;
+    const diff = team.score + candidate.score - partialTarget;
     return (
       diff * diff * scoreWeight +
-      positionDelta(team, candidate.pos1, 1, candidate.score)
+      positionScorePenalty(team, candidate.pos1, candidate.score)
     );
   }
 
-  for (const candidate of remaining) {
-    // Fill the emptiest teams first, so nobody is left with a forced placement.
-    const open = teams.filter((team) => team.members.length < teamSize);
-    if (open.length === 0) {
-      return emptyResult("Could not place every player.", "internal");
-    }
-    const minCount = Math.min(...open.map((team) => team.members.length));
-    const eligible = open.filter((team) => team.members.length === minCount);
+  const byPosition = new Map();
+  for (const player of remaining) {
+    const key = player.pos1 || "";
+    if (!byPosition.has(key)) byPosition.set(key, []);
+    byPosition.get(key).push(player);
+  }
+  // Scarcest position first: a lone keeper must claim a slot before the
+  // unpositioned players fill the squad up around them.
+  const positionOrder = [...byPosition.keys()].sort((a, b) => {
+    if (!a) return 1;
+    if (!b) return -1;
+    return (posCounts[a] || 0) - (posCounts[b] || 0) || a.localeCompare(b);
+  });
 
-    let best = eligible[0];
-    let bestPenalty = Infinity;
-    for (const team of eligible) {
-      const pen = penalty(team, candidate);
-      if (pen < bestPenalty) {
-        bestPenalty = pen;
-        best = team;
+  for (const pos of positionOrder) {
+    for (const candidate of byPosition.get(pos)) {
+      const open = teams.filter((team) => team.members.length < teamSize);
+      if (open.length === 0) {
+        return emptyResult("Could not place every player.", "internal");
       }
+      // Teams still under their fair share of this position get first refusal.
+      const withRoom = pos
+        ? open.filter((team) => (team.pos[pos] || 0) < posCeil[pos])
+        : [];
+      const eligible = withRoom.length ? withRoom : open;
+      // Keep squad sizes level so nobody is left with a forced placement.
+      const minCount = Math.min(...eligible.map((team) => team.members.length));
+      const finalists = eligible.filter((team) => team.members.length === minCount);
+
+      let best = finalists[0];
+      let bestPenalty = Infinity;
+      for (const team of finalists) {
+        const penalty = fitPenalty(team, candidate);
+        if (penalty < bestPenalty) {
+          bestPenalty = penalty;
+          best = team;
+        }
+      }
+      addMember(best, candidate);
     }
-    addMember(best, candidate);
   }
 
   for (const team of teams) {
@@ -525,10 +538,42 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     }
   }
 
-  // ---- Local search on the real objective -------------------------------
-  // Score imbalance AND position imbalance, so the swap phase can no longer
-  // undo the positional work done above.
-  function swapDelta(teamA, teamB, playerA, playerB) {
+  // ---- Hierarchical balancing -------------------------------------------
+  // Positions first, ratings second. A position slot is never traded for a
+  // better rating split until the ratings have been levelled as far as they
+  // can be *within* a correct position fit, and even then only while the gap
+  // is still wider than scoreTolerance.
+
+  // How many players sit in a team that already holds its fair share of their
+  // position. Zero means every position is spread as evenly as the arithmetic
+  // allows.
+  function countMisfits() {
+    let total = 0;
+    for (const team of teams) {
+      for (const pos of allPos) {
+        total += Math.max(0, (team.pos[pos] || 0) - posCeil[pos]);
+      }
+    }
+    return total;
+  }
+
+  function misfitDelta(teamA, teamB, playerA, playerB) {
+    if (playerA.pos1 === playerB.pos1) return 0;
+    const cell = (team, pos, change) => {
+      if (!pos) return 0;
+      const have = team.pos[pos] || 0;
+      const ceiling = posCeil[pos] || 0;
+      return Math.max(0, have + change - ceiling) - Math.max(0, have - ceiling);
+    };
+    return (
+      cell(teamA, playerA.pos1, -1) +
+      cell(teamA, playerB.pos1, 1) +
+      cell(teamB, playerB.pos1, -1) +
+      cell(teamB, playerA.pos1, 1)
+    );
+  }
+
+  function ratingDelta(teamA, teamB, playerA, playerB) {
     const nextA = teamA.score - playerA.score + playerB.score;
     const nextB = teamB.score - playerB.score + playerA.score;
     let delta =
@@ -538,23 +583,22 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
         (teamB.score - targetTeamTotal) ** 2) *
       scoreWeight;
 
+    if (!posScoreWeight) return delta;
     if (playerA.pos1 !== playerB.pos1) {
       delta +=
-        positionDelta(teamA, playerA.pos1, -1, playerA.score) +
-        positionDelta(teamA, playerB.pos1, 1, playerB.score) +
-        positionDelta(teamB, playerB.pos1, -1, playerB.score) +
-        positionDelta(teamB, playerA.pos1, 1, playerA.score);
-    } else if (posScoreWeight && playerA.pos1) {
+        positionScorePenalty(teamA, playerA.pos1, -playerA.score) +
+        positionScorePenalty(teamA, playerB.pos1, playerB.score) +
+        positionScorePenalty(teamB, playerB.pos1, -playerB.score) +
+        positionScorePenalty(teamB, playerA.pos1, playerA.score);
+    } else if (playerA.pos1) {
       // Same position: the counts do not move, but the rating does.
       const pos = playerA.pos1;
       const ideal = idealPosScore[pos] || 0;
       const haveA = teamA.posScore[pos] || 0;
       const haveB = teamB.posScore[pos] || 0;
-      const nextPosA = haveA - playerA.score + playerB.score;
-      const nextPosB = haveB - playerB.score + playerA.score;
       delta +=
-        ((nextPosA - ideal) ** 2 +
-          (nextPosB - ideal) ** 2 -
+        ((haveA - playerA.score + playerB.score - ideal) ** 2 +
+          (haveB - playerB.score + playerA.score - ideal) ** 2 -
           (haveA - ideal) ** 2 -
           (haveB - ideal) ** 2) *
         posScoreWeight;
@@ -567,56 +611,129 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
   const movable = (player) => !lockedIds.has(player.id);
   const sameRole = (a, b) => activeSeedIds.has(a.id) === activeSeedIds.has(b.id);
 
-  const EPSILON = 1e-9;
-  const MAX_PASSES = 100;
-  for (let pass = 0; pass < MAX_PASSES; pass += 1) {
-    let best = null;
-    let bestDelta = -EPSILON;
+  function ratingSpread() {
+    const totals = teams.map((team) => team.score);
+    return Math.max(...totals) - Math.min(...totals);
+  }
 
-    for (let i = 0; i < teams.length; i += 1) {
-      for (let j = i + 1; j < teams.length; j += 1) {
-        for (let a = 0; a < teams[i].members.length; a += 1) {
-          const playerA = teams[i].members[a];
-          if (!movable(playerA)) continue;
-          for (let b = 0; b < teams[j].members.length; b += 1) {
-            const playerB = teams[j].members[b];
-            if (!movable(playerB) || !sameRole(playerA, playerB)) continue;
-            const delta = swapDelta(teams[i], teams[j], playerA, playerB);
-            if (delta < bestDelta) {
-              bestDelta = delta;
-              best = { i, j, a, b };
+  function snapshot() {
+    return teams.map((team) => [...team.members]);
+  }
+
+  function restore(snap) {
+    teams.forEach((team, index) => {
+      team.members = [...snap[index]];
+      recount(team);
+    });
+  }
+
+  const EPSILON = 1e-9;
+  const MAX_PASSES = 200;
+
+  /**
+   * Hill-climb by swapping pairs between teams.
+   * `budget` caps how many players may sit outside their position's fair
+   * share. With `positionsFirst`, a swap that reduces the misfit count always
+   * wins, whatever it does to the ratings; otherwise only the ratings matter
+   * and the budget is what protects the positions.
+   */
+  function improve(budget, positionsFirst) {
+    for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+      const misfits = countMisfits();
+      let best = null;
+      let bestMisfit = 0;
+      let bestRating = -EPSILON;
+
+      for (let i = 0; i < teams.length; i += 1) {
+        for (let j = i + 1; j < teams.length; j += 1) {
+          for (let a = 0; a < teams[i].members.length; a += 1) {
+            const playerA = teams[i].members[a];
+            if (!movable(playerA)) continue;
+            for (let b = 0; b < teams[j].members.length; b += 1) {
+              const playerB = teams[j].members[b];
+              if (!movable(playerB) || !sameRole(playerA, playerB)) continue;
+
+              const dMisfit = misfitDelta(teams[i], teams[j], playerA, playerB);
+              if (misfits + dMisfit > budget) continue;
+              const dRating = ratingDelta(teams[i], teams[j], playerA, playerB);
+
+              if (positionsFirst) {
+                if (
+                  dMisfit < bestMisfit ||
+                  (dMisfit === bestMisfit && dRating < bestRating)
+                ) {
+                  bestMisfit = dMisfit;
+                  bestRating = dRating;
+                  best = { i, j, a, b };
+                }
+              } else if (dRating < bestRating) {
+                bestRating = dRating;
+                best = { i, j, a, b };
+              }
             }
           }
         }
       }
-    }
 
-    if (!best) break;
-    const teamA = teams[best.i];
-    const teamB = teams[best.j];
-    const playerA = teamA.members[best.a];
-    const playerB = teamB.members[best.b];
-    teamA.members[best.a] = playerB;
-    teamB.members[best.b] = playerA;
-    recount(teamA);
-    recount(teamB);
+      if (!best) break;
+      const teamA = teams[best.i];
+      const teamB = teams[best.j];
+      const playerA = teamA.members[best.a];
+      const playerB = teamB.members[best.b];
+      teamA.members[best.a] = playerB;
+      teamB.members[best.b] = playerA;
+      recount(teamA);
+      recount(teamB);
+    }
   }
 
-  // Recompute from members so accumulated float error never reaches the UI.
-  teams.forEach(recount);
+  // Step 1 — fit the positions, and level the ratings as far as they will go
+  // without ever giving a position slot back.
+  improve(countMisfits(), true);
 
-  const teamScores = teams.map((team) => team.score);
-  const spread = Math.max(...teamScores) - Math.min(...teamScores);
+  const fittedMisfits = countMisfits();
+  let outcome = { snap: snapshot(), misfits: fittedMisfits, spread: ratingSpread() };
+
+  if (outcome.spread > scoreTolerance) {
+    // Step 2 — the ratings are still too far apart, so release position slots
+    // one player at a time and stop at the first level that closes the gap.
+    let fallback = outcome;
+    let closed = null;
+    const cap = fittedMisfits + Math.max(1, numTeams);
+    for (let budget = fittedMisfits + 1; budget <= cap; budget += 1) {
+      improve(budget, false);
+      const spread = ratingSpread();
+      const state = { snap: snapshot(), misfits: countMisfits(), spread };
+      if (spread <= scoreTolerance) {
+        closed = state;
+        break;
+      }
+      if (spread < fallback.spread - EPSILON) fallback = state;
+    }
+    outcome = closed || fallback;
+    restore(outcome.snap);
+  }
+
+  const positionsReleased = outcome.misfits - fittedMisfits;
+  const spread = ratingSpread();
+
   if (activeLock && spread > 1.5) {
     warnings.push({ code: "lockedImbalance", spread: Number(spread.toFixed(1)) });
   }
-
-  const unevenPositions = allPos.filter((pos) => {
-    const counts = teams.map((team) => team.pos[pos] || 0);
-    return Math.max(...counts) - Math.min(...counts) > 1;
-  });
-  if (unevenPositions.length) {
-    warnings.push({ code: "positionsUneven", positions: unevenPositions });
+  if (fittedMisfits > 0) {
+    // Even the best fit leaves someone out of place, e.g. three keepers
+    // between two teams.
+    const uneven = allPos.filter((pos) =>
+      teams.some((team) => (team.pos[pos] || 0) > posCeil[pos])
+    );
+    if (uneven.length) warnings.push({ code: "positionsUneven", positions: uneven });
+  }
+  if (positionsReleased > 0) {
+    warnings.push({
+      code: "positionsReleased",
+      count: positionsReleased,
+      spread: Number(spread.toFixed(1)),
+    });
   }
 
   // ---- Subs -------------------------------------------------------------
@@ -654,6 +771,8 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     subs,
     used: pool.length,
     spread,
+    misfits: outcome.misfits,
+    positionsReleased,
     seededIds: [...activeSeedIds],
   };
 }

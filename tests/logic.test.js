@@ -802,3 +802,140 @@ test("per-position ratings stay balanced without disturbing the keeper split", (
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// Positions are fitted first; rating balance is optimised inside that fit, and
+// position slots are only released when the rating gap is still too wide.
+// ---------------------------------------------------------------------------
+
+// Keepers carry all the quality: rated 10 and 1 while everyone else is 5.
+// Giving each team a keeper forces a 9-point gap; putting both on one side
+// closes it to 1. There is no middle ground, so the two goals genuinely fight.
+function conflictingRoster() {
+  return [
+    { id: "gk-strong", name: "Keeper A", score: 10, pos1: "GK" },
+    { id: "gk-weak", name: "Keeper B", score: 1, pos1: "GK" },
+    ...Array.from({ length: 6 }, (_, i) => ({
+      id: `f${i}`,
+      name: `Field ${i}`,
+      score: 5,
+      pos1: "FL",
+    })),
+  ];
+}
+
+test("a wide tolerance keeps the position fit and accepts the rating gap", () => {
+  const result = computeAssignments(conflictingRoster(), {
+    numTeams: 2,
+    teamSize: 4,
+    seed: "conflict",
+    scoreTolerance: 9,
+    seedTopPlayers: false,
+  });
+  assert.equal(result.error, null);
+  result.teams.forEach((team) => {
+    assert.equal(team.members.filter((m) => m.pos1 === "GK").length, 1);
+  });
+  assert.equal(result.positionsReleased, 0);
+});
+
+test("a tight tolerance releases position slots to close the rating gap", () => {
+  const result = computeAssignments(conflictingRoster(), {
+    numTeams: 2,
+    teamSize: 4,
+    seed: "conflict",
+    scoreTolerance: 1,
+    seedTopPlayers: false,
+  });
+  assert.equal(result.error, null);
+  assert.ok(result.spread <= 1, `rating gap ${result.spread} should be within tolerance`);
+  assert.ok(result.positionsReleased > 0, "some position slots had to be released");
+  assert.ok(result.warnings.some((w) => w.code === "positionsReleased"));
+});
+
+test("positions are never released when the ratings already fit", () => {
+  // Four keepers of similar quality across four teams: both goals are
+  // satisfiable at once, so even the tightest tolerance must leave the
+  // position fit alone.
+  const roster = [
+    { name: "GK A", score: 6, pos1: "GK" },
+    { name: "GK B", score: 5.5, pos1: "GK" },
+    { name: "GK C", score: 6.5, pos1: "GK" },
+    { name: "GK D", score: 5, pos1: "GK" },
+    ...Array.from({ length: 16 }, (_, i) => ({
+      name: `Field ${i}`,
+      score: 3 + ((i * 0.37) % 6),
+      pos1: "FL",
+    })),
+  ];
+  for (const scoreTolerance of [0.25, 1, 3]) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const players = roster.map((row, i) => ({ ...row, id: `p${i}` }));
+      const result = computeAssignments(players, {
+        numTeams: 4,
+        teamSize: 5,
+        seed: `fit-${attempt}`,
+        scoreTolerance,
+      });
+      assert.equal(result.error, null);
+      result.teams.forEach((team) => {
+        assert.equal(
+          team.members.filter((m) => m.pos1 === "GK").length,
+          1,
+          `tolerance ${scoreTolerance}, attempt ${attempt}`
+        );
+      });
+      assert.equal(result.positionsReleased, 0);
+    }
+  }
+});
+
+test("a tighter tolerance never gives a worse rating gap", () => {
+  const roster = Array.from({ length: 20 }, (_, i) => ({
+    id: `p${i}`,
+    name: `P${i}`,
+    score: 1 + ((i * 1.3) % 9),
+    pos1: ["GK", "DF", "MF", "FW"][i % 4],
+  }));
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const seed = `mono-${attempt}`;
+    const tight = computeAssignments(roster, { numTeams: 4, teamSize: 5, seed, scoreTolerance: 0.1 });
+    const loose = computeAssignments(roster, { numTeams: 4, teamSize: 5, seed, scoreTolerance: 5 });
+    assert.equal(tight.error, null);
+    assert.equal(loose.error, null);
+    assert.ok(
+      tight.spread <= loose.spread + 1e-9,
+      `tight ${tight.spread} should not exceed loose ${loose.spread}`
+    );
+    assert.ok(
+      tight.positionsReleased >= loose.positionsReleased,
+      "a tighter tolerance may only release more position slots, never fewer"
+    );
+  }
+});
+
+test("the best possible position fit is reached on ordinary rosters", () => {
+  const positions = ["GK", "DF", "MF", "FW", ""];
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const players = Array.from({ length: 20 }, (_, i) => ({
+      id: `p${i}`,
+      name: `P${i}`,
+      score: 1 + ((i * 2.1 + attempt) % 9),
+      pos1: positions[(i + attempt) % positions.length],
+    }));
+    const result = computeAssignments(players, {
+      numTeams: 4,
+      teamSize: 5,
+      seed: `fitcheck-${attempt}`,
+      scoreTolerance: 1,
+    });
+    assert.equal(result.error, null);
+    // Whatever is left out of place must be a slot deliberately released, not
+    // a failure of the fitting step.
+    assert.equal(
+      result.misfits - result.positionsReleased,
+      0,
+      `attempt ${attempt}: fitting step left ${result.misfits - result.positionsReleased} misfit(s)`
+    );
+  }
+});
