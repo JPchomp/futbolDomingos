@@ -10,9 +10,9 @@ export const DEFAULT_SCORE = 5;
 // The number is roughly "how many points of team-total gap we will accept to
 // give every team one more correctly-placed specialist".
 export const BALANCE_PRESETS = {
-  score: { scoreWeight: 1, posWeight: 0.25 },
-  balanced: { scoreWeight: 1, posWeight: 1 },
-  positions: { scoreWeight: 1, posWeight: 4 },
+  score: { scoreWeight: 1, posWeight: 0.25, posScoreWeight: 0.05 },
+  balanced: { scoreWeight: 1, posWeight: 1, posScoreWeight: 0.2 },
+  positions: { scoreWeight: 1, posWeight: 4, posScoreWeight: 0.8 },
 };
 
 export function uid(length = 7) {
@@ -303,6 +303,7 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     teamSize = 0,
     seed = "",
     posWeight = 1,
+    posScoreWeight = 0.2,
     scoreWeight = 1,
     seedTopPlayers = true,
   } = options;
@@ -372,6 +373,17 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
   const idealPos = Object.fromEntries(
     allPos.map((pos) => [pos, posCounts[pos] / numTeams])
   );
+
+  // Balancing counts alone would happily give one team the best keeper and the
+  // best striker, so the rating carried by each position is levelled too.
+  const posScoreTotals = Object.fromEntries(allPos.map((pos) => [pos, 0]));
+  pool.forEach((player) => {
+    if (player.pos1) posScoreTotals[player.pos1] += player.score;
+  });
+  const idealPosScore = Object.fromEntries(
+    allPos.map((pos) => [pos, posScoreTotals[pos] / numTeams])
+  );
+
   const targets = Array.from({ length: numTeams }, () => ({}));
   for (const pos of allPos) {
     const base = Math.floor(posCounts[pos] / numTeams);
@@ -386,6 +398,7 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     members: [],
     score: 0,
     pos: {},
+    posScore: {},
     index,
   }));
 
@@ -395,7 +408,21 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
   function addMember(team, player) {
     team.members.push(player);
     team.score += player.score;
-    if (player.pos1) team.pos[player.pos1] = (team.pos[player.pos1] || 0) + 1;
+    if (player.pos1) {
+      team.pos[player.pos1] = (team.pos[player.pos1] || 0) + 1;
+      team.posScore[player.pos1] = (team.posScore[player.pos1] || 0) + player.score;
+    }
+  }
+
+  function recount(team) {
+    team.score = team.members.reduce((sum, member) => sum + member.score, 0);
+    team.pos = {};
+    team.posScore = {};
+    team.members.forEach((member) => {
+      if (!member.pos1) return;
+      team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
+      team.posScore[member.pos1] = (team.posScore[member.pos1] || 0) + member.score;
+    });
   }
 
   lockedMembers.forEach((member) => addMember(teams[activeLock.index], member));
@@ -444,18 +471,31 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
   const placed = new Set([...lockedIds, ...activeSeedIds]);
   const remaining = pool.filter((player) => !placed.has(player.id));
 
-  function positionDelta(team, pos, change) {
-    if (!pos || !posWeight) return 0;
-    const ideal = idealPos[pos] || 0;
-    const have = team.pos[pos] || 0;
-    return ((have + change - ideal) ** 2 - (have - ideal) ** 2) * posWeight;
+  function positionDelta(team, pos, change, score) {
+    if (!pos) return 0;
+    let delta = 0;
+    if (posWeight) {
+      const ideal = idealPos[pos] || 0;
+      const have = team.pos[pos] || 0;
+      delta += ((have + change - ideal) ** 2 - (have - ideal) ** 2) * posWeight;
+    }
+    if (posScoreWeight) {
+      const ideal = idealPosScore[pos] || 0;
+      const have = team.posScore[pos] || 0;
+      const next = have + change * score;
+      delta += ((next - ideal) ** 2 - (have - ideal) ** 2) * posScoreWeight;
+    }
+    return delta;
   }
 
   function penalty(team, candidate) {
     const projected = team.score + candidate.score;
     const partialTarget = (targetTeamTotal * (team.members.length + 1)) / teamSize;
     const diff = projected - partialTarget;
-    return diff * diff * scoreWeight + positionDelta(team, candidate.pos1, 1);
+    return (
+      diff * diff * scoreWeight +
+      positionDelta(team, candidate.pos1, 1, candidate.score)
+    );
   }
 
   for (const candidate of remaining) {
@@ -500,10 +540,24 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
 
     if (playerA.pos1 !== playerB.pos1) {
       delta +=
-        positionDelta(teamA, playerA.pos1, -1) +
-        positionDelta(teamA, playerB.pos1, 1) +
-        positionDelta(teamB, playerB.pos1, -1) +
-        positionDelta(teamB, playerA.pos1, 1);
+        positionDelta(teamA, playerA.pos1, -1, playerA.score) +
+        positionDelta(teamA, playerB.pos1, 1, playerB.score) +
+        positionDelta(teamB, playerB.pos1, -1, playerB.score) +
+        positionDelta(teamB, playerA.pos1, 1, playerA.score);
+    } else if (posScoreWeight && playerA.pos1) {
+      // Same position: the counts do not move, but the rating does.
+      const pos = playerA.pos1;
+      const ideal = idealPosScore[pos] || 0;
+      const haveA = teamA.posScore[pos] || 0;
+      const haveB = teamB.posScore[pos] || 0;
+      const nextPosA = haveA - playerA.score + playerB.score;
+      const nextPosB = haveB - playerB.score + playerA.score;
+      delta +=
+        ((nextPosA - ideal) ** 2 +
+          (nextPosB - ideal) ** 2 -
+          (haveA - ideal) ** 2 -
+          (haveB - ideal) ** 2) *
+        posScoreWeight;
     }
     return delta;
   }
@@ -544,22 +598,12 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
     const playerB = teamB.members[best.b];
     teamA.members[best.a] = playerB;
     teamB.members[best.b] = playerA;
-    teamA.score += playerB.score - playerA.score;
-    teamB.score += playerA.score - playerB.score;
-    if (playerA.pos1) teamA.pos[playerA.pos1] -= 1;
-    if (playerB.pos1) teamA.pos[playerB.pos1] = (teamA.pos[playerB.pos1] || 0) + 1;
-    if (playerB.pos1) teamB.pos[playerB.pos1] -= 1;
-    if (playerA.pos1) teamB.pos[playerA.pos1] = (teamB.pos[playerA.pos1] || 0) + 1;
+    recount(teamA);
+    recount(teamB);
   }
 
   // Recompute from members so accumulated float error never reaches the UI.
-  teams.forEach((team) => {
-    team.score = team.members.reduce((sum, member) => sum + member.score, 0);
-    team.pos = {};
-    team.members.forEach((member) => {
-      if (member.pos1) team.pos[member.pos1] = (team.pos[member.pos1] || 0) + 1;
-    });
-  });
+  teams.forEach(recount);
 
   const teamScores = teams.map((team) => team.score);
   const spread = Math.max(...teamScores) - Math.min(...teamScores);
