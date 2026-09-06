@@ -201,17 +201,9 @@ export function buildClipboardTeams(teams) {
     const color = SHIRT_COLORS[idx % SHIRT_COLORS.length];
     lines.push(`${label} - ${color}`);
     const members = team?.members || [];
-    const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
-    if (hasAnyPos) {
-      members.forEach((member) => {
-        const pos = member.pos1 ? member.pos1.trim() : "";
-        lines.push(pos ? `${member.name} ${pos}` : member.name);
-      });
-    } else {
-      members.forEach((member) => {
-        lines.push(member.name);
-      });
-    }
+    members.forEach((member) => {
+      lines.push(member.name);
+    });
     lines.push("");
   });
   return lines.join("\n");

@@ -69,7 +69,8 @@ test("buildClipboardTeams outputs space-separated rows", () => {
   const text = buildClipboardTeams(teams);
   assert.match(text, /Team 1 - White/);
   assert.doesNotMatch(text, /Name Pos/);
-  assert.match(text, /Alice MF/);
+  assert.match(text, /Alice/);
+  assert.doesNotMatch(text, /Alice MF/);
   assert.doesNotMatch(text, /Name,Pos/);
   assert.doesNotMatch(text, /Alice,MF/);
 });
@@ -602,7 +603,9 @@ test("copy-teams-with-scores round-trips back into players", () => {
   );
 });
 
-test("copy-teams round-trips names and positions", () => {
+test("copy-teams round-trips names, and deliberately drops positions", () => {
+  // "Copy teams" is the plain list meant for a chat message, so it carries no
+  // positions. "Copy teams with scores" is the one that round-trips fully.
   const teams = [
     {
       name: "Team 1",
@@ -612,12 +615,14 @@ test("copy-teams round-trips names and positions", () => {
       ],
     },
   ];
-  const parsed = parseListIgnoreNumbers(buildClipboardTeams(teams));
+  const text = buildClipboardTeams(teams);
+  assert.doesNotMatch(text, /GK/);
+  const parsed = parseListIgnoreNumbers(text);
   assert.deepEqual(
     parsed.map((p) => [p.name, p.pos1]),
     [
-      ["Juan", "GK"],
-      ["Ana Maria", "DF"],
+      ["Juan", ""],
+      ["Ana Maria", ""],
     ]
   );
 });
