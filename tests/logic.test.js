@@ -178,6 +178,72 @@ test("computeAssignments keeps score discrepancy small for 3 teams", () => {
   assert.ok(maxDiff <= 1, `Score difference ${maxDiff} should be ≤ 1 for scores 1–12 into 3 teams`);
 });
 
+test("computeAssignments balances per-position scores across teams", () => {
+  // 8 players split evenly: 4 DF and 4 MF, each position has scores 10,9,6,5.
+  // Optimal split for each position: both teams get two players totalling 15 each.
+  const players = [
+    { id: "1", name: "DF1", score: 10, pos1: "DF" },
+    { id: "2", name: "DF2", score: 9,  pos1: "DF" },
+    { id: "3", name: "DF3", score: 6,  pos1: "DF" },
+    { id: "4", name: "DF4", score: 5,  pos1: "DF" },
+    { id: "5", name: "MF1", score: 10, pos1: "MF" },
+    { id: "6", name: "MF2", score: 9,  pos1: "MF" },
+    { id: "7", name: "MF3", score: 6,  pos1: "MF" },
+    { id: "8", name: "MF4", score: 5,  pos1: "MF" },
+  ];
+  const result = computeAssignments(players, {
+    numTeams: 2,
+    teamSize: 4,
+    seed: "",
+    posWeight: 5,
+    scoreWeight: 1,
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.teams.length, 2);
+  // Each team should have posScore close to 15 for DF and 15 for MF.
+  result.teams.forEach((team) => {
+    assert.ok(team.posScore !== undefined, "team.posScore should be defined");
+  });
+  const dfScores = result.teams.map((t) => t.posScore?.DF || 0);
+  const mfScores = result.teams.map((t) => t.posScore?.MF || 0);
+  const dfDiff = Math.abs(dfScores[0] - dfScores[1]);
+  const mfDiff = Math.abs(mfScores[0] - mfScores[1]);
+  assert.ok(dfDiff <= 1, `DF score difference ${dfDiff} should be ≤ 1`);
+  assert.ok(mfDiff <= 1, `MF score difference ${mfDiff} should be ≤ 1`);
+});
+
+test("computeAssignments does not crash with only one player of a position across many teams", () => {
+  // 1 GK for 4 teams — the GK cannot be distributed evenly, but the algorithm must not crash.
+  const players = [
+    { id: "1",  name: "GK1",  score: 8, pos1: "GK" },
+    ...Array.from({ length: 15 }, (_, i) => ({
+      id: String(i + 2),
+      name: `DF${i + 1}`,
+      score: 5 + (i % 4),
+      pos1: "DF",
+    })),
+  ];
+  let result;
+  assert.doesNotThrow(() => {
+    result = computeAssignments(players, {
+      numTeams: 4,
+      teamSize: 4,
+      seed: "edge",
+      posWeight: 5,
+      scoreWeight: 1,
+    });
+  });
+  assert.equal(result.error, null);
+  assert.equal(result.teams.length, 4);
+  result.teams.forEach((team) => {
+    assert.equal(team.members.length, 4);
+    assert.ok(team.posScore !== undefined, "team.posScore should be defined");
+  });
+  // The single GK must end up on exactly one team.
+  const gkCounts = result.teams.map((t) => t.members.filter((m) => m.pos1 === "GK").length);
+  assert.equal(gkCounts.reduce((a, b) => a + b, 0), 1, "Exactly 1 GK across all teams");
+});
+
 test("buildClipboardPlayers outputs tab-delimited rows with name, pos, score", () => {
   const players = [
     { id: "a", name: "Alice", pos1: "MF", score: 7.5 },
@@ -699,67 +765,12 @@ test("removeFromDatabase drops one entry by name", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-position rating balance (from copilot/optimize-team-scores-by-position).
-// Balancing counts alone would let one team take the best keeper and the best
-// striker while the counts still looked even.
+// Per-position rating balance. Balancing counts alone would let one team take
+// the best keeper and the best striker while the counts still looked even.
+// (See also the two tests above, from copilot/optimize-team-scores-by-position.)
 // ---------------------------------------------------------------------------
 
-test("per-position ratings are balanced, not just position counts", () => {
-  // 4 DF and 4 MF, each with scores 10, 9, 6, 5. The even split gives both
-  // teams 15 points of defending and 15 of midfield.
-  const players = [
-    { id: "1", name: "DF1", score: 10, pos1: "DF" },
-    { id: "2", name: "DF2", score: 9, pos1: "DF" },
-    { id: "3", name: "DF3", score: 6, pos1: "DF" },
-    { id: "4", name: "DF4", score: 5, pos1: "DF" },
-    { id: "5", name: "MF1", score: 10, pos1: "MF" },
-    { id: "6", name: "MF2", score: 9, pos1: "MF" },
-    { id: "7", name: "MF3", score: 6, pos1: "MF" },
-    { id: "8", name: "MF4", score: 5, pos1: "MF" },
-  ];
-  const result = computeAssignments(players, {
-    numTeams: 2,
-    teamSize: 4,
-    seed: "",
-    ...BALANCE_PRESETS.balanced,
-  });
-  assert.equal(result.error, null);
-  result.teams.forEach((team) => assert.ok(team.posScore !== undefined));
-  const df = result.teams.map((team) => team.posScore.DF || 0);
-  const mf = result.teams.map((team) => team.posScore.MF || 0);
-  assert.ok(Math.abs(df[0] - df[1]) <= 1, `DF rating gap ${Math.abs(df[0] - df[1])} should be <= 1`);
-  assert.ok(Math.abs(mf[0] - mf[1]) <= 1, `MF rating gap ${Math.abs(mf[0] - mf[1])} should be <= 1`);
-});
 
-test("a position rarer than the number of teams is handled without error", () => {
-  // 1 GK across 4 teams cannot be spread evenly; it must still not blow up.
-  const players = [
-    { id: "1", name: "GK1", score: 8, pos1: "GK" },
-    ...Array.from({ length: 15 }, (_, i) => ({
-      id: String(i + 2),
-      name: `DF${i + 1}`,
-      score: 5 + (i % 4),
-      pos1: "DF",
-    })),
-  ];
-  const result = computeAssignments(players, {
-    numTeams: 4,
-    teamSize: 4,
-    seed: "edge",
-    ...BALANCE_PRESETS.positions,
-  });
-  assert.equal(result.error, null);
-  assert.equal(result.teams.length, 4);
-  result.teams.forEach((team) => {
-    assert.equal(team.members.length, 4);
-    assert.ok(team.posScore !== undefined);
-  });
-  const keepers = result.teams.reduce(
-    (sum, team) => sum + team.members.filter((m) => m.pos1 === "GK").length,
-    0
-  );
-  assert.equal(keepers, 1, "the single keeper ends up on exactly one team");
-});
 
 test("per-position ratings stay balanced without disturbing the keeper split", () => {
   // Two keepers of very different quality plus two strikers: each team should
