@@ -30,21 +30,17 @@ Site will deploy to: `https://yourproject.vercel.app`.
 
 The two goals are **hierarchical, not weighted**. A position slot is never
 traded for a better rating split while the ratings can still be improved within
-a correct fit. Only if the rating gap is still wider than the **Balance
-priority** setting allows does the app start giving position slots back, one
-player at a time, stopping at the first level that closes the gap — and it
-reports how many it gave up.
-
-- **Even positions** — positions are strict, whatever gap that leaves.
-- **Balanced** — give a slot back only if the gap exceeds 1 point.
-- **Even ratings** — give a slot back if the gap exceeds 0.25 points.
+a correct fit. If the rating gap remains wider than 1 point, the app gives
+position slots back one player at a time until the gap closes, and reports how
+many it gave up.
 
 When the two goals do not conflict, which is the normal case, positions are
-fitted perfectly at every setting and nothing is given up.
+fitted perfectly and nothing is given up.
 
 Ratings run 0–10. A trailing number outside that range is treated as part of the
 name rather than a rating, so shirt numbers and phone numbers pasted from a chat
-do not become ratings.
+do not become ratings. Check marks and decorative icons are removed from pasted
+names; players without a rating default to 5.
 
 ## Tests
 
