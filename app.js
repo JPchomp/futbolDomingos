@@ -6,7 +6,7 @@ import {
   buildClipboardPlayers,
   normalizePlayers,
   computeAssignments,
-  loadPlayerDatabase,
+  unlockPlayerDatabase,
   savePlayerDatabase,
   matchPlayersFromDatabase,
   updateDatabase,
@@ -23,7 +23,7 @@ import {
   translateWarning,
 } from "./translations.js";
 
-const { useMemo, useState, useEffect } = React;
+const { useMemo, useState, useEffect, useRef } = React;
 const html = htm.bind(React.createElement);
 
 /** "" while the field is being edited; otherwise a positive whole number. */
@@ -49,7 +49,13 @@ function App() {
   const [pasteWarnings, setPasteWarnings] = useState([]);
   const [lockedTeam, setLockedTeam] = useState(null);
   const [language, setLanguage] = useState("en");
-  const [db, setDb] = useState(() => loadPlayerDatabase());
+  const [db, setDb] = useState([]);
+  const [dbSession, setDbSession] = useState(null);
+  const [dbPassword, setDbPassword] = useState("");
+  const [dbUnlocking, setDbUnlocking] = useState(false);
+  const [dbSaving, setDbSaving] = useState(false);
+  const dbWriteInProgress = useRef(false);
+  const [dbError, setDbError] = useState(null);
   const [showDb, setShowDb] = useState(false);
   const [notice, setNotice] = useState(null);
 
@@ -130,6 +136,7 @@ function App() {
   }
 
   function handlePasteWithDb() {
+    if (!dbSession) return;
     const { players: parsed, warnings: parseWarnings } = parseList(pasteText);
     const matched = matchPlayersFromDatabase(parsed, db);
     setPlayers((prev) => [...prev, ...matched]);
@@ -140,33 +147,61 @@ function App() {
     }
   }
 
-  function handleUploadToDb() {
+  async function handleUnlockDb(event) {
+    event.preventDefault();
+    if (dbUnlocking) return;
+    setDbUnlocking(true);
+    setDbError(null);
+    const outcome = await unlockPlayerDatabase(dbPassword);
+    setDbPassword("");
+    setDbUnlocking(false);
+    if (outcome.status === "ready") {
+      setDb(outcome.db);
+      setDbSession(outcome.session);
+      setShowDb(true);
+    } else {
+      setDbError(outcome.status);
+    }
+  }
+
+  function handleLockDb() {
+    if (dbWriteInProgress.current) return;
+    setShowDb(false);
+    setDb([]);
+    setDbSession(null);
+    setDbPassword("");
+    setDbError(null);
+  }
+
+  async function persistDb(updated) {
+    if (!dbSession || dbWriteInProgress.current) return false;
+    dbWriteInProgress.current = true;
+    setDbSaving(true);
+    let saved = false;
+    try {
+      saved = await savePlayerDatabase(updated, dbSession);
+    } finally {
+      dbWriteInProgress.current = false;
+      setDbSaving(false);
+    }
+    if (saved) setDb(updated);
+    else flash(t.dbSaveFailed);
+    return saved;
+  }
+
+  async function handleUploadToDb() {
     const updated = updateDatabase(normalizePlayers(players), db);
-    if (savePlayerDatabase(updated)) {
-      setDb(updated);
-      flash(t.dbSaved);
-    } else {
-      flash(t.dbSaveFailed);
-    }
+    if (await persistDb(updated)) flash(t.dbSaved);
   }
 
-  function handleDeleteDbEntry(name) {
+  async function handleDeleteDbEntry(name) {
     const updated = removeFromDatabase(name, db);
-    if (savePlayerDatabase(updated)) {
-      setDb(updated);
-    } else {
-      flash(t.dbSaveFailed);
-    }
+    await persistDb(updated);
   }
 
-  function handleClearDb() {
+  async function handleClearDb() {
     if (!window.confirm(t.dbClearConfirm)) return;
-    if (savePlayerDatabase([])) {
-      setDb([]);
-      flash(t.dbSaved);
-    } else {
-      flash(t.dbSaveFailed);
-    }
+    if (await persistDb([])) flash(t.dbSaved);
   }
 
   function reshuffleTeams() {
@@ -258,12 +293,14 @@ function App() {
           >
             ${t.addPlayers}
           </button>
-          <button
-            onClick=${handlePasteWithDb}
-            class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
-          >
-            ${t.addPlayersFromDb}
-          </button>
+          ${dbSession && html`
+            <button
+              onClick=${handlePasteWithDb}
+              class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+            >
+              ${t.addPlayersFromDb}
+            </button>
+          `}
         </div>
       </section>
 
@@ -336,12 +373,15 @@ function App() {
         ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">${t.noPlayersYet}</p>`}
         ${players.length > 0 && html`
           <div class="mt-4 flex flex-wrap justify-end gap-2">
-            <button
-              onClick=${handleUploadToDb}
-              class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-            >
-              ${t.uploadToDb}
-            </button>
+            ${dbSession && html`
+              <button
+                onClick=${handleUploadToDb}
+                disabled=${dbSaving}
+                class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
+              >
+                ${t.uploadToDb}
+              </button>
+            `}
             <button
               onClick=${() => copyToClipboard(buildClipboardPlayers(players))}
               class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
@@ -479,18 +519,59 @@ function App() {
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-xl font-semibold text-gray-900">${t.database}</h2>
-            <p class="text-xs text-gray-500 mt-1">
-              ${t.dbEntries(db.length)} · ${t.dbLocalOnly}
-            </p>
+            ${dbSession && html`
+              <p class="text-xs text-gray-500 mt-1">
+                ${t.dbEntries(db.length)} · ${t.dbLocalOnly}
+              </p>
+            `}
           </div>
-          <button
-            onClick=${() => setShowDb(!showDb)}
-            class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
-          >
-            ${showDb ? t.hideDatabase : t.showDatabase}
-          </button>
+          ${dbSession && html`
+            <div class="flex gap-2">
+              <button
+                onClick=${() => setShowDb(!showDb)}
+                class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+              >
+                ${showDb ? t.hideDatabase : t.showDatabase}
+              </button>
+              <button
+                onClick=${handleLockDb}
+                disabled=${dbSaving}
+                class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"
+              >
+                ${t.lockDatabase}
+              </button>
+            </div>
+          `}
         </div>
-        ${showDb && html`
+        ${!dbSession && html`
+          <form onSubmit=${handleUnlockDb} class="mt-4 flex flex-wrap items-end gap-3">
+            <label class="flex flex-col text-sm text-gray-700">
+              ${t.dbPassword}
+              <input
+                type="password"
+                value=${dbPassword}
+                onChange=${(event) => setDbPassword(event.target.value)}
+                autocomplete="off"
+                class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled=${dbUnlocking || !dbPassword}
+              class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
+            >
+              ${dbUnlocking ? t.dbUnlocking : t.unlockDatabase}
+            </button>
+          </form>
+          <p class="text-xs text-gray-500 mt-2">${t.dbLockedHint}</p>
+          ${dbError && html`
+            <p class="text-sm text-red-600 mt-2" role="alert">
+              ${dbError === "invalid" ? t.dbWrongPassword :
+                dbError === "corrupt" ? t.dbCorrupt : t.dbUnavailable}
+            </p>
+          `}
+        `}
+        ${dbSession && showDb && html`
           <div class="mt-4">
             ${db.length === 0
               ? html`<p class="text-sm text-gray-500">${t.dbEmpty}</p>`
@@ -506,7 +587,8 @@ function App() {
                           </span>
                           <button
                             onClick=${() => handleDeleteDbEntry(entry.name)}
-                            class="px-2 py-1 text-xs text-red-600 hover:text-red-800"
+                            disabled=${dbSaving}
+                            class="px-2 py-1 text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
                           >
                             ${t.dbDelete}
                           </button>
@@ -523,7 +605,8 @@ function App() {
                     </button>
                     <button
                       onClick=${handleClearDb}
-                      class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                      disabled=${dbSaving}
+                      class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm disabled:opacity-50"
                     >
                       ${t.dbClear}
                     </button>
