@@ -42,6 +42,14 @@ name rather than a rating, so shirt numbers and phone numbers pasted from a chat
 do not become ratings. Check marks and decorative icons are removed from pasted
 names; players without a rating default to 5.
 
+## Player database
+
+The saved player database stays in this browser. Enter the database password
+to view it, use it for matching, or change its entries. The app encrypts saved
+entries with a key derived from the password and keeps that key only while the
+database is unlocked. Older readable browser data is migrated to encrypted
+storage after the first successful unlock in that browser.
+
 ## Tests
 
 ```
