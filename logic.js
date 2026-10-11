@@ -1,3 +1,10 @@
+import {
+  verifyDatabasePassword,
+  createDatabaseSession,
+  encryptDatabase,
+  decryptDatabase,
+} from "./database-security.js";
+
 const RANDOM_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 // Ratings live on a 0–10 scale. Anything outside it is a typo (a shirt number,
@@ -152,8 +159,8 @@ export function parseList(text) {
     // Team headers emitted by the "Copy teams" buttons are not players.
     if (TEAM_HEADER.test(line)) continue;
 
-    // Drop a leading list number ("1.", "2 -", "3:").
-    const listNumber = line.match(/^\s*\d+\s*[.\-:\t ]+\s*/);
+    // Drop a leading list number ("1.", "2)", "3 -", "4:").
+    const listNumber = line.match(/^\s*\d+\s*[.)\-:\t ]+\s*/);
     let rest = listNumber ? line.slice(listNumber[0].length).trim() : line;
     // A bare "10" is a list number with nothing after it.
     if (!listNumber && /^\d+$/.test(rest)) continue;
@@ -786,6 +793,7 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
 // ---------------------------------------------------------------------------
 
 const DB_KEY = "futbolDomingos_playerDb";
+const ENCRYPTED_DB_KEY = "futbolDomingos_playerDbEncrypted";
 
 /** Drop anything malformed so a corrupted key can never crash the app. */
 export function sanitizeDatabase(db) {
@@ -820,22 +828,49 @@ function getStorage() {
   }
 }
 
-export function loadPlayerDatabase() {
+export async function unlockPlayerDatabase(password) {
   const storage = getStorage();
-  if (!storage) return [];
+  if (!storage || !globalThis.crypto?.subtle) return { status: "unavailable" };
   try {
-    const raw = storage.getItem(DB_KEY);
-    return sanitizeDatabase(raw ? JSON.parse(raw) : []);
+    if (!await verifyDatabasePassword(password)) return { status: "invalid" };
   } catch {
-    return [];
+    return { status: "unavailable" };
+  }
+
+  try {
+    const encrypted = storage.getItem(ENCRYPTED_DB_KEY);
+    if (encrypted !== null) {
+      try {
+        const { plaintext, session } = await decryptDatabase(encrypted, password);
+        const db = sanitizeDatabase(JSON.parse(plaintext));
+        // Finish a migration interrupted after the encrypted write.
+        if (storage.getItem(DB_KEY) !== null) storage.removeItem(DB_KEY);
+        if (storage.getItem(DB_KEY) !== null) return { status: "unavailable" };
+        return { status: "ready", db, session };
+      } catch {
+        return { status: "corrupt" };
+      }
+    }
+
+    // The old app stored readable JSON. Move it only after a correct unlock.
+    const legacy = storage.getItem(DB_KEY);
+    const db = sanitizeDatabase(legacy ? JSON.parse(legacy) : []);
+    const session = await createDatabaseSession(password);
+    storage.setItem(ENCRYPTED_DB_KEY, await encryptDatabase(JSON.stringify(db), session));
+    if (legacy !== null) storage.removeItem(DB_KEY);
+    if (storage.getItem(DB_KEY) !== null) return { status: "unavailable" };
+    return { status: "ready", db, session };
+  } catch {
+    return { status: "unavailable" };
   }
 }
 
-export function savePlayerDatabase(db) {
+export async function savePlayerDatabase(db, session) {
   const storage = getStorage();
-  if (!storage) return false;
+  if (!storage || !session?.key) return false;
   try {
-    storage.setItem(DB_KEY, JSON.stringify(sanitizeDatabase(db)));
+    const encrypted = await encryptDatabase(JSON.stringify(sanitizeDatabase(db)), session);
+    storage.setItem(ENCRYPTED_DB_KEY, encrypted);
     return true;
   } catch {
     return false;
