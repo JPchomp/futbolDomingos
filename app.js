@@ -45,7 +45,6 @@ function App() {
   const [numTeamsInput, setNumTeamsInput] = useState("2");
   const [teamSizeInput, setTeamSizeInput] = useState("5");
   const [shuffleSeed, setShuffleSeed] = useState(() => uid());
-  const [balanceMode, setBalanceMode] = useState("balanced");
   const [pasteText, setPasteText] = useState("");
   const [pasteWarnings, setPasteWarnings] = useState([]);
   const [lockedTeam, setLockedTeam] = useState(null);
@@ -68,7 +67,6 @@ function App() {
   }, [numTeams, lockedTeam]);
 
   const result = useMemo(() => {
-    const weights = BALANCE_PRESETS[balanceMode] || BALANCE_PRESETS.balanced;
     try {
       return computeAssignments(
         players,
@@ -76,7 +74,7 @@ function App() {
           numTeams: numTeams === "" ? 0 : numTeams,
           teamSize: teamSize === "" ? 0 : teamSize,
           seed: shuffleSeed,
-          ...weights,
+          ...BALANCE_PRESETS.balanced,
         },
         lockedTeam
       );
@@ -98,7 +96,7 @@ function App() {
         seededIds: [],
       };
     }
-  }, [players, numTeams, teamSize, shuffleSeed, balanceMode, lockedTeam]);
+  }, [players, numTeams, teamSize, shuffleSeed, lockedTeam]);
 
   const seededIds = useMemo(() => new Set(result.seededIds || []), [result]);
   const errorMessage = translateError(result, t);
@@ -228,23 +226,10 @@ function App() {
             ${language === "en" ? "Español" : "English"}
           </button>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           ${countField(t.numTeams, numTeamsInput, setNumTeamsInput)}
           ${countField(t.teamSize, teamSizeInput, setTeamSizeInput)}
-          <label class="flex flex-col text-sm text-gray-700">
-            ${t.balancePriority}
-            <select
-              value=${balanceMode}
-              onChange=${(event) => setBalanceMode(event.target.value)}
-              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-            >
-              <option value="score">${t.balanceScore}</option>
-              <option value="balanced">${t.balanceBalanced}</option>
-              <option value="positions">${t.balancePositions}</option>
-            </select>
-          </label>
         </div>
-        <p class="mt-3 text-xs text-gray-500">${t.balanceHint}</p>
         ${Number.isInteger(numTeams) &&
         numTeams > 1 &&
         html`<p class="mt-1 text-xs text-gray-500">${t.seedRuleNote(numTeams)}</p>`}
