@@ -12,12 +12,6 @@ export const translations = {
     numTeams: "Number of teams",
     teamSize: "Team size",
     wholeNumberHint: "Whole numbers only.",
-    balancePriority: "Balance priority",
-    balanceScore: "Even ratings",
-    balanceBalanced: "Balanced",
-    balancePositions: "Even positions",
-    balanceHint:
-      "Positions are fitted first, then ratings are levelled within that fit. Position slots are only given back if the rating gap is still wider than this setting allows.",
     playerList: "Player list",
     pasteInstructions:
       "Paste a list of players to quickly populate the table. Format: list number, name, score (e.g., \"1 John Doe 8.5\"). Ratings run from 0 to 10; a trailing number outside that range is treated as part of the name.",
@@ -70,7 +64,7 @@ export const translations = {
     warnPositionsUneven: (positions) =>
       `These positions do not divide evenly between the teams: ${positions}.`,
     warnPositionsReleased: (count, spread) =>
-      `Moved ${count} player(s) out of their position's fair share to bring the rating gap down to ${spread}. Raise the acceptable gap to keep positions strict.`,
+      `Moved ${count} player(s) out of their position's fair share to bring the rating gap down to ${spread}.`,
     database: "Player database",
     showDatabase: "Show database",
     hideDatabase: "Hide database",
@@ -93,12 +87,6 @@ export const translations = {
     numTeams: "Número de equipos",
     teamSize: "Tamaño del equipo",
     wholeNumberHint: "Solo números enteros.",
-    balancePriority: "Prioridad de balance",
-    balanceScore: "Puntuaciones parejas",
-    balanceBalanced: "Equilibrado",
-    balancePositions: "Posiciones parejas",
-    balanceHint:
-      "Primero se ajustan las posiciones y luego se nivelan las puntuaciones dentro de ese ajuste. Solo se ceden cupos de posición si la diferencia de puntuación sigue siendo mayor de lo que permite este ajuste.",
     playerList: "Lista de jugadores",
     pasteInstructions:
       "Pegue una lista de jugadores para poblar rápidamente la tabla. Formato: número de lista, nombre, puntuación (ej., \"1 John Doe 8.5\"). Las puntuaciones van de 0 a 10; un número final fuera de ese rango se toma como parte del nombre.",
@@ -151,7 +139,7 @@ export const translations = {
     warnPositionsUneven: (positions) =>
       `Estas posiciones no se dividen de forma pareja entre los equipos: ${positions}.`,
     warnPositionsReleased: (count, spread) =>
-      `Se movió ${count} jugador(es) fuera de su cupo de posición para bajar la diferencia de puntuación a ${spread}. Aumente la diferencia aceptable para mantener las posiciones estrictas.`,
+      `Se movió ${count} jugador(es) fuera de su cupo de posición para bajar la diferencia de puntuación a ${spread}.`,
     database: "Base de datos de jugadores",
     showDatabase: "Ver base de datos",
     hideDatabase: "Ocultar base de datos",
