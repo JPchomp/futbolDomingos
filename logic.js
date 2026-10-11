@@ -6,9 +6,7 @@ export const MIN_SCORE = 0;
 export const MAX_SCORE = 10;
 export const DEFAULT_SCORE = 5;
 
-// Positions are fitted first and ratings are levelled inside that fit, so the
-// only real knob is how wide a rating gap between teams is acceptable before
-// position slots start being given back.
+// Positions are fitted first and ratings are levelled inside that fit.
 export const BALANCE_PRESETS = {
   score: { scoreTolerance: 0.25 },
   balanced: { scoreTolerance: 1 },
@@ -104,10 +102,16 @@ function splitTrailingPosition(name) {
   return { name: rest, pos1: candidate };
 }
 
+function stripStatusIcons(raw) {
+  // Include variation selectors and joiners left behind by emoji sequences.
+  return raw.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u2600-\u27BF\uFE0E\uFE0F\u200D\u20E3]/gu, " ");
+}
+
 function cleanName(raw) {
-  return raw
+  return stripStatusIcons(raw)
     .replace(/\./g, "")
     .replace(/[\s,:;\-]+$/, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -154,7 +158,7 @@ export function parseList(text) {
     // A bare "10" is a list number with nothing after it.
     if (!listNumber && /^\d+$/.test(rest)) continue;
 
-    rest = rest.replace(/[\s.,:;]+$/, "");
+    rest = stripStatusIcons(rest).replace(/[\s.,:;]+$/, "").trim();
 
     // A trailing number is the rating — but only if it could actually be one.
     let score = DEFAULT_SCORE;
