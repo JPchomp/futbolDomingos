@@ -3,7 +3,9 @@ import {
   parseList,
   buildClipboardTeams,
   buildClipboardTeamsWithScores,
+  buildClipboardTeamsWithPositions,
   buildClipboardPlayers,
+  sortPlayersByPositionAndScore,
   normalizePlayers,
   computeAssignments,
   unlockPlayerDatabase,
@@ -106,6 +108,13 @@ function App() {
   }, [players, numTeams, teamSize, shuffleSeed, lockedTeam]);
 
   const seededIds = useMemo(() => new Set(result.seededIds || []), [result]);
+  const displayedTeams = useMemo(
+    () => result.teams.map((team) => ({
+      ...team,
+      members: sortPlayersByPositionAndScore(team.members),
+    })),
+    [result.teams]
+  );
   const errorMessage = translateError(result, t);
   const warnings = [...pasteWarnings, ...(result.warnings || [])]
     .map((warning) => translateWarning(warning, t))
@@ -436,7 +445,7 @@ function App() {
             ${t.spreadLabel}: ${result.spread.toFixed(1)}
           </p>
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-            ${result.teams.map((team, index) => {
+            ${displayedTeams.map((team, index) => {
               const isLocked = lockedTeam && lockedTeam.index === index;
               return html`
                 <div key=${team.name} class="border border-gray-200 rounded-lg p-4">
@@ -481,18 +490,24 @@ function App() {
               `;
             })}
           </div>
-          <div class="mt-6 flex justify-end gap-2">
+          <div class="mt-6 flex flex-wrap justify-end gap-2">
             <button
-              onClick=${() => copyToClipboard(buildClipboardTeams(result.teams))}
+              onClick=${() => copyToClipboard(buildClipboardTeams(displayedTeams))}
               class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
             >
               ${t.copyTeams}
             </button>
             <button
-              onClick=${() => copyToClipboard(buildClipboardTeamsWithScores(result.teams))}
+              onClick=${() => copyToClipboard(buildClipboardTeamsWithScores(displayedTeams))}
               class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700"
             >
               ${t.copyTeamsWithScores}
+            </button>
+            <button
+              onClick=${() => copyToClipboard(buildClipboardTeamsWithPositions(displayedTeams))}
+              class="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+            >
+              ${t.copyTeamsWithPositions}
             </button>
           </div>
         `}

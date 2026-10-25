@@ -212,13 +212,48 @@ export function parseListIgnoreNumbers(text) {
 
 const SHIRT_COLORS = ["White", "Black", "Orange", "Yellow"];
 
+const DISPLAY_POSITION_ORDER = new Map([
+  ["GK", 0], ["ARQ", 0], ["POR", 0],
+  ["D", 1], ["DF", 1], ["DEF", 1], ["CB", 1], ["LB", 1], ["RB", 1], ["LAT", 1], ["CIERRE", 1],
+  ["M", 2], ["MF", 2], ["MED", 2], ["CM", 2], ["CDM", 2], ["CAM", 2], ["LM", 2], ["RM", 2], ["VOL", 2], ["PIVOT", 2],
+  ["A", 3], ["FW", 3], ["DEL", 3], ["LW", 3], ["RW", 3], ["ST", 3], ["EXT", 3], ["ALA", 3],
+]);
+
+/** Return a presentation order without changing team membership or player data. */
+export function sortPlayersByPositionAndScore(players) {
+  return [...(players || [])].sort((a, b) => {
+    const positionA = normalizePosition(a?.pos1);
+    const positionB = normalizePosition(b?.pos1);
+    const rankA = DISPLAY_POSITION_ORDER.get(positionA) ?? 4;
+    const rankB = DISPLAY_POSITION_ORDER.get(positionB) ?? 4;
+    if (rankA !== rankB) return rankA - rankB;
+    if (rankA === 4 && positionA !== positionB) {
+      return positionA.localeCompare(positionB, undefined, { sensitivity: "base" });
+    }
+
+    const validA = a?.score !== null && a?.score !== undefined &&
+      String(a.score).trim() !== "" && isValidScore(a.score);
+    const validB = b?.score !== null && b?.score !== undefined &&
+      String(b.score).trim() !== "" && isValidScore(b.score);
+    if (validA !== validB) return validA ? -1 : 1;
+    if (validA && Number(a.score) !== Number(b.score)) {
+      return Number(b.score) - Number(a.score);
+    }
+
+    const nameOrder = String(a?.name ?? "").toLocaleLowerCase()
+      .localeCompare(String(b?.name ?? "").toLocaleLowerCase());
+    if (nameOrder !== 0) return nameOrder;
+    return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+  });
+}
+
 export function buildClipboardTeams(teams) {
   const lines = [];
   (teams || []).forEach((team, idx) => {
     const label = team?.name ? String(team.name) : `Team ${idx + 1}`;
     const color = SHIRT_COLORS[idx % SHIRT_COLORS.length];
     lines.push(`${label} - ${color}`);
-    const members = team?.members || [];
+    const members = sortPlayersByPositionAndScore(team?.members);
     members.forEach((member) => {
       lines.push(member.name);
     });
@@ -233,12 +268,25 @@ export function buildClipboardTeamsWithScores(teams) {
     const label = team?.name ? String(team.name) : `Team ${idx + 1}`;
     const totalScore = (team?.score || 0).toFixed(1);
     lines.push(`${label} ${totalScore}`);
-    const members = team?.members || [];
+    const members = sortPlayersByPositionAndScore(team?.members);
     const hasAnyPos = members.some((m) => m.pos1 && m.pos1.trim());
     members.forEach((member) => {
       const pos = hasAnyPos && member.pos1 ? member.pos1.trim() : "";
       const playerScore = coerceScore(member.score).score.toFixed(1);
       lines.push(pos ? `${member.name} ${pos} ${playerScore}` : `${member.name} ${playerScore}`);
+    });
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+export function buildClipboardTeamsWithPositions(teams) {
+  const lines = [];
+  (teams || []).forEach((team, idx) => {
+    lines.push(team?.name ? String(team.name) : `Team ${idx + 1}`);
+    sortPlayersByPositionAndScore(team?.members).forEach((member) => {
+      const position = normalizePosition(member.pos1);
+      lines.push(position ? `${member.name} (${position})` : member.name);
     });
     lines.push("");
   });
