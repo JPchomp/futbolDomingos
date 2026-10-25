@@ -1,3 +1,16 @@
+import {
+  verifyDatabasePassword,
+  createDatabaseSession,
+  encryptDatabase,
+  decryptDatabase,
+  decryptWithSession,
+  generateDropBoxKeyPair,
+  importDropBoxPublicKey,
+  importDropBoxPrivateKey,
+  sealForDatabase,
+  openSealedForDatabase,
+} from "./database-security.js";
+
 const RANDOM_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 // Ratings live on a 0–10 scale. Anything outside it is a typo (a shirt number,
@@ -6,9 +19,7 @@ export const MIN_SCORE = 0;
 export const MAX_SCORE = 10;
 export const DEFAULT_SCORE = 5;
 
-// Positions are fitted first and ratings are levelled inside that fit, so the
-// only real knob is how wide a rating gap between teams is acceptable before
-// position slots start being given back.
+// Positions are fitted first and ratings are levelled inside that fit.
 export const BALANCE_PRESETS = {
   score: { scoreTolerance: 0.25 },
   balanced: { scoreTolerance: 1 },
@@ -104,10 +115,16 @@ function splitTrailingPosition(name) {
   return { name: rest, pos1: candidate };
 }
 
+function stripStatusIcons(raw) {
+  // Include variation selectors and joiners left behind by emoji sequences.
+  return raw.replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\p{Emoji_Modifier}\u2600-\u27BF\uFE0E\uFE0F\u200D\u20E3]/gu, " ");
+}
+
 function cleanName(raw) {
-  return raw
+  return stripStatusIcons(raw)
     .replace(/\./g, "")
     .replace(/[\s,:;\-]+$/, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -148,13 +165,13 @@ export function parseList(text) {
     // Team headers emitted by the "Copy teams" buttons are not players.
     if (TEAM_HEADER.test(line)) continue;
 
-    // Drop a leading list number ("1.", "2 -", "3:").
-    const listNumber = line.match(/^\s*\d+\s*[.\-:\t ]+\s*/);
+    // Drop a leading list number ("1.", "2)", "3 -", "4:").
+    const listNumber = line.match(/^\s*\d+\s*[.)\-:\t ]+\s*/);
     let rest = listNumber ? line.slice(listNumber[0].length).trim() : line;
     // A bare "10" is a list number with nothing after it.
     if (!listNumber && /^\d+$/.test(rest)) continue;
 
-    rest = rest.replace(/[\s.,:;]+$/, "");
+    rest = stripStatusIcons(rest).replace(/[\s.,:;]+$/, "").trim();
 
     // A trailing number is the rating — but only if it could actually be one.
     let score = DEFAULT_SCORE;
@@ -782,6 +799,13 @@ export function computeAssignments(players, options = {}, lockedTeam = null) {
 // ---------------------------------------------------------------------------
 
 const DB_KEY = "futbolDomingos_playerDb";
+const ENCRYPTED_DB_KEY = "futbolDomingos_playerDbEncrypted";
+const DB_PUBLIC_KEY = "futbolDomingos_playerDbPublicKey";
+const DB_PRIVATE_KEY = "futbolDomingos_playerDbPrivateKey";
+const DB_PENDING_KEY = "futbolDomingos_playerDbPending";
+
+/** A cap so an unattended page cannot be used to fill up browser storage. */
+export const MAX_PENDING_ENTRIES = 500;
 
 /** Drop anything malformed so a corrupted key can never crash the app. */
 export function sanitizeDatabase(db) {
@@ -816,22 +840,152 @@ function getStorage() {
   }
 }
 
-export function loadPlayerDatabase() {
-  const storage = getStorage();
-  if (!storage) return [];
+function readPendingEntries(storage) {
   try {
-    const raw = storage.getItem(DB_KEY);
-    return sanitizeDatabase(raw ? JSON.parse(raw) : []);
+    const raw = storage.getItem(DB_PENDING_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-export function savePlayerDatabase(db) {
-  const storage = getStorage();
-  if (!storage) return false;
+/**
+ * The private key is stored under the same salt as the database itself, so the
+ * single derivation done to open the database also opens the drop box.
+ */
+async function installDropBoxKeyPair(storage, session) {
+  const pair = await generateDropBoxKeyPair();
+  storage.setItem(DB_PRIVATE_KEY, await encryptDatabase(pair.privateKey, session));
+  storage.setItem(DB_PUBLIC_KEY, pair.publicKey);
+}
+
+/** Opens everything sealed in since the last unlock. Exported to be tested. */
+export async function openDatabaseDropBox(storage, session) {
+  const pending = readPendingEntries(storage);
+  let privateKey = null;
   try {
-    storage.setItem(DB_KEY, JSON.stringify(sanitizeDatabase(db)));
+    const stored = storage.getItem(DB_PRIVATE_KEY);
+    if (stored !== null) {
+      privateKey = await importDropBoxPrivateKey(await decryptWithSession(stored, session));
+    }
+  } catch {
+    privateKey = null;
+  }
+
+  // Without a usable key pair nothing sealed earlier can ever be read again,
+  // so the only honest thing is to start a fresh box and report the loss.
+  if (!privateKey) {
+    await installDropBoxKeyPair(storage, session);
+    return { entries: [], dropped: pending.length };
+  }
+
+  const entries = [];
+  let dropped = 0;
+  for (const record of pending) {
+    try {
+      entries.push(JSON.parse(await openSealedForDatabase(record, privateKey)));
+    } catch {
+      dropped += 1;
+    }
+  }
+  return { entries: sanitizeDatabase(entries), dropped };
+}
+
+/**
+ * Seals players into the drop box without the password. The caller cannot read
+ * the database, cannot check for duplicates, and cannot read back what it just
+ * wrote; entries are merged in at the next unlock.
+ */
+export async function submitPlayersToDatabase(players) {
+  const storage = getStorage();
+  if (!storage || !globalThis.crypto?.subtle) return { status: "unavailable", queued: 0 };
+
+  const entries = sanitizeDatabase(
+    normalizePlayers(players).map(({ name, score, pos1 }) => ({ name, score, pos1 }))
+  );
+  if (!entries.length) return { status: "queued", queued: 0 };
+
+  let publicKey;
+  try {
+    const stored = storage.getItem(DB_PUBLIC_KEY);
+    // No drop box yet means this browser holds no database to add to.
+    if (!stored) return { status: "locked", queued: 0 };
+    publicKey = await importDropBoxPublicKey(stored);
+  } catch {
+    return { status: "locked", queued: 0 };
+  }
+
+  try {
+    const pending = readPendingEntries(storage);
+    if (pending.length + entries.length > MAX_PENDING_ENTRIES) {
+      return { status: "full", queued: 0 };
+    }
+    for (const entry of entries) {
+      pending.push(await sealForDatabase(JSON.stringify(entry), publicKey));
+    }
+    storage.setItem(DB_PENDING_KEY, JSON.stringify(pending));
+    return { status: "queued", queued: entries.length };
+  } catch {
+    return { status: "unavailable", queued: 0 };
+  }
+}
+
+export async function unlockPlayerDatabase(password) {
+  const storage = getStorage();
+  if (!storage || !globalThis.crypto?.subtle) return { status: "unavailable" };
+  try {
+    if (!await verifyDatabasePassword(password)) return { status: "invalid" };
+  } catch {
+    return { status: "unavailable" };
+  }
+
+  try {
+    const encrypted = storage.getItem(ENCRYPTED_DB_KEY);
+    let db;
+    let session;
+    if (encrypted !== null) {
+      try {
+        const opened = await decryptDatabase(encrypted, password);
+        db = sanitizeDatabase(JSON.parse(opened.plaintext));
+        session = opened.session;
+      } catch {
+        return { status: "corrupt" };
+      }
+    } else {
+      // The old app stored readable JSON. Move it only after a correct unlock.
+      const legacy = storage.getItem(DB_KEY);
+      db = sanitizeDatabase(legacy ? JSON.parse(legacy) : []);
+      session = await createDatabaseSession(password);
+    }
+
+    const box = await openDatabaseDropBox(storage, session);
+    const merged = box.entries.length ? updateDatabase(box.entries, db) : db;
+    if (encrypted === null || box.entries.length) {
+      storage.setItem(ENCRYPTED_DB_KEY, await encryptDatabase(JSON.stringify(merged), session));
+    }
+    if (box.entries.length || box.dropped) storage.removeItem(DB_PENDING_KEY);
+    // Finish a migration interrupted after the encrypted write.
+    if (storage.getItem(DB_KEY) !== null) storage.removeItem(DB_KEY);
+    if (storage.getItem(DB_KEY) !== null) return { status: "unavailable" };
+    return {
+      status: "ready",
+      db: merged,
+      session,
+      merged: box.entries.length,
+      dropped: box.dropped,
+    };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+export async function savePlayerDatabase(db, session) {
+  const storage = getStorage();
+  if (!storage || !session?.key) return false;
+  try {
+    const encrypted = await encryptDatabase(JSON.stringify(sanitizeDatabase(db)), session);
+    storage.setItem(ENCRYPTED_DB_KEY, encrypted);
     return true;
   } catch {
     return false;

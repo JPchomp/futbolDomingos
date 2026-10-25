@@ -12,12 +12,6 @@ export const translations = {
     numTeams: "Number of teams",
     teamSize: "Team size",
     wholeNumberHint: "Whole numbers only.",
-    balancePriority: "Balance priority",
-    balanceScore: "Even ratings",
-    balanceBalanced: "Balanced",
-    balancePositions: "Even positions",
-    balanceHint:
-      "Positions are fitted first, then ratings are levelled within that fit. Position slots are only given back if the rating gap is still wider than this setting allows.",
     playerList: "Player list",
     pasteInstructions:
       "Paste a list of players to quickly populate the table. Format: list number, name, score (e.g., \"1 John Doe 8.5\"). Ratings run from 0 to 10; a trailing number outside that range is treated as part of the name.",
@@ -70,8 +64,16 @@ export const translations = {
     warnPositionsUneven: (positions) =>
       `These positions do not divide evenly between the teams: ${positions}.`,
     warnPositionsReleased: (count, spread) =>
-      `Moved ${count} player(s) out of their position's fair share to bring the rating gap down to ${spread}. Raise the acceptable gap to keep positions strict.`,
+      `Moved ${count} player(s) out of their position's fair share to bring the rating gap down to ${spread}.`,
     database: "Player database",
+    dbPassword: "Database password",
+    unlockDatabase: "Unlock database",
+    dbUnlocking: "Unlocking…",
+    lockDatabase: "Lock database",
+    dbLockedHint: "Players can be added without the password. Unlock to view, use or change saved players.",
+    dbWrongPassword: "Incorrect database password.",
+    dbCorrupt: "The encrypted database could not be read. Its stored data was left unchanged.",
+    dbUnavailable: "The database could not be unlocked. Check that browser storage is available.",
     showDatabase: "Show database",
     hideDatabase: "Hide database",
     dbEntries: (count) => `${count} player(s) stored`,
@@ -83,7 +85,14 @@ export const translations = {
     dbSaved: "Database updated.",
     dbSaveFailed: "Could not save. Browser storage is full or unavailable.",
     dbMatched: (matched, total) => `${matched} of ${total} players matched the database.`,
-    dbLocalOnly: "Stored in this browser only.",
+    dbLocalOnly: "Encrypted in this browser only.",
+    dbQueued: (count) =>
+      `${count} player(s) sealed into the database. They appear once it is unlocked.`,
+    dbQueueLocked: "This browser holds no database yet. It has to be unlocked once first.",
+    dbQueueFull: "Too many players are waiting to be added. Unlock the database to take them in.",
+    dbMergedOnUnlock: (count) => `${count} player(s) added while locked were merged in.`,
+    dbDroppedOnUnlock: (count) =>
+      `${count} player(s) added while locked could not be read and were discarded.`,
     copyFailed: "Copy failed. Please copy manually.",
     copyUnavailable: "Clipboard access unavailable. Please copy manually.",
     copied: "Copied.",
@@ -93,12 +102,6 @@ export const translations = {
     numTeams: "Número de equipos",
     teamSize: "Tamaño del equipo",
     wholeNumberHint: "Solo números enteros.",
-    balancePriority: "Prioridad de balance",
-    balanceScore: "Puntuaciones parejas",
-    balanceBalanced: "Equilibrado",
-    balancePositions: "Posiciones parejas",
-    balanceHint:
-      "Primero se ajustan las posiciones y luego se nivelan las puntuaciones dentro de ese ajuste. Solo se ceden cupos de posición si la diferencia de puntuación sigue siendo mayor de lo que permite este ajuste.",
     playerList: "Lista de jugadores",
     pasteInstructions:
       "Pegue una lista de jugadores para poblar rápidamente la tabla. Formato: número de lista, nombre, puntuación (ej., \"1 John Doe 8.5\"). Las puntuaciones van de 0 a 10; un número final fuera de ese rango se toma como parte del nombre.",
@@ -151,8 +154,16 @@ export const translations = {
     warnPositionsUneven: (positions) =>
       `Estas posiciones no se dividen de forma pareja entre los equipos: ${positions}.`,
     warnPositionsReleased: (count, spread) =>
-      `Se movió ${count} jugador(es) fuera de su cupo de posición para bajar la diferencia de puntuación a ${spread}. Aumente la diferencia aceptable para mantener las posiciones estrictas.`,
+      `Se movió ${count} jugador(es) fuera de su cupo de posición para bajar la diferencia de puntuación a ${spread}.`,
     database: "Base de datos de jugadores",
+    dbPassword: "Contraseña de la base de datos",
+    unlockDatabase: "Desbloquear base de datos",
+    dbUnlocking: "Desbloqueando…",
+    lockDatabase: "Bloquear base de datos",
+    dbLockedHint: "Se pueden agregar jugadores sin la contraseña. Desbloquéela para ver, usar o modificar los jugadores guardados.",
+    dbWrongPassword: "Contraseña incorrecta de la base de datos.",
+    dbCorrupt: "No se pudo leer la base de datos cifrada. Los datos guardados no se modificaron.",
+    dbUnavailable: "No se pudo desbloquear la base de datos. Compruebe que el almacenamiento del navegador esté disponible.",
     showDatabase: "Ver base de datos",
     hideDatabase: "Ocultar base de datos",
     dbEntries: (count) => `${count} jugador(es) guardado(s)`,
@@ -165,7 +176,15 @@ export const translations = {
     dbSaveFailed: "No se pudo guardar. El almacenamiento del navegador está lleno o no disponible.",
     dbMatched: (matched, total) =>
       `${matched} de ${total} jugadores coincidieron con la base de datos.`,
-    dbLocalOnly: "Guardado solo en este navegador.",
+    dbLocalOnly: "Cifrada solo en este navegador.",
+    dbQueued: (count) =>
+      `${count} jugador(es) sellado(s) en la base de datos. Aparecerán al desbloquearla.`,
+    dbQueueLocked: "Este navegador aún no tiene base de datos. Hay que desbloquearla una vez primero.",
+    dbQueueFull: "Hay demasiados jugadores esperando. Desbloquee la base de datos para incorporarlos.",
+    dbMergedOnUnlock: (count) =>
+      `Se incorporaron ${count} jugador(es) agregado(s) mientras estaba bloqueada.`,
+    dbDroppedOnUnlock: (count) =>
+      `No se pudieron leer ${count} jugador(es) agregado(s) mientras estaba bloqueada y se descartaron.`,
     copyFailed: "No se pudo copiar. Copie manualmente.",
     copyUnavailable: "Portapapeles no disponible. Copie manualmente.",
     copied: "Copiado.",

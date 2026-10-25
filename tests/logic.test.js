@@ -43,6 +43,40 @@ test("parseListIgnoreNumbers removes numeric prefixes", () => {
   assert.equal(players[2].score, 5); // default score when no score provided
 });
 
+test("pasted numbered names lose status icons without losing names or ratings", () => {
+  const input = [
+    "1. Carlos",
+    "2. Giovanni ✅",
+    "3.Luis ✔️",
+    "3) María ✔️ 7",
+    "4.TantoRuido✅️",
+    "5. Luis Miguel ☑️",
+    "6. César ✓",
+    "7. Ana ❌",
+    "8. María-José ⭐ 8.5",
+    "9. Jo 🔥 7,5",
+    "10. François 🇫🇷",
+    "11. O'Neil ❎",
+    "12.",
+  ].join("\n");
+  const players = parseListIgnoreNumbers(input);
+
+  assert.deepEqual(players.map(({ name, score }) => [name, score]), [
+    ["Carlos", 5],
+    ["Giovanni", 5],
+    ["Luis", 5],
+    ["María", 7],
+    ["TantoRuido", 5],
+    ["Luis Miguel", 5],
+    ["César", 5],
+    ["Ana", 5],
+    ["María-José", 8.5],
+    ["Jo", 7.5],
+    ["François", 5],
+    ["O'Neil", 5],
+  ]);
+});
+
 test("parseListIgnoreNumbers extracts ratings as scores", () => {
   const input = "1 John Doe 8.5\n2 Jane Smith 7.1\n3 Carlos\n4 Maria 9,2";
   const players = parseListIgnoreNumbers(input);

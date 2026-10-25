@@ -6,8 +6,9 @@ import {
   buildClipboardPlayers,
   normalizePlayers,
   computeAssignments,
-  loadPlayerDatabase,
+  unlockPlayerDatabase,
   savePlayerDatabase,
+  submitPlayersToDatabase,
   matchPlayersFromDatabase,
   updateDatabase,
   removeFromDatabase,
@@ -23,7 +24,7 @@ import {
   translateWarning,
 } from "./translations.js";
 
-const { useMemo, useState, useEffect } = React;
+const { useMemo, useState, useEffect, useRef } = React;
 const html = htm.bind(React.createElement);
 
 /** "" while the field is being edited; otherwise a positive whole number. */
@@ -45,12 +46,17 @@ function App() {
   const [numTeamsInput, setNumTeamsInput] = useState("2");
   const [teamSizeInput, setTeamSizeInput] = useState("5");
   const [shuffleSeed, setShuffleSeed] = useState(() => uid());
-  const [balanceMode, setBalanceMode] = useState("balanced");
   const [pasteText, setPasteText] = useState("");
   const [pasteWarnings, setPasteWarnings] = useState([]);
   const [lockedTeam, setLockedTeam] = useState(null);
   const [language, setLanguage] = useState("en");
-  const [db, setDb] = useState(() => loadPlayerDatabase());
+  const [db, setDb] = useState([]);
+  const [dbSession, setDbSession] = useState(null);
+  const [dbPassword, setDbPassword] = useState("");
+  const [dbUnlocking, setDbUnlocking] = useState(false);
+  const [dbSaving, setDbSaving] = useState(false);
+  const dbWriteInProgress = useRef(false);
+  const [dbError, setDbError] = useState(null);
   const [showDb, setShowDb] = useState(false);
   const [notice, setNotice] = useState(null);
 
@@ -68,7 +74,6 @@ function App() {
   }, [numTeams, lockedTeam]);
 
   const result = useMemo(() => {
-    const weights = BALANCE_PRESETS[balanceMode] || BALANCE_PRESETS.balanced;
     try {
       return computeAssignments(
         players,
@@ -76,7 +81,7 @@ function App() {
           numTeams: numTeams === "" ? 0 : numTeams,
           teamSize: teamSize === "" ? 0 : teamSize,
           seed: shuffleSeed,
-          ...weights,
+          ...BALANCE_PRESETS.balanced,
         },
         lockedTeam
       );
@@ -98,7 +103,7 @@ function App() {
         seededIds: [],
       };
     }
-  }, [players, numTeams, teamSize, shuffleSeed, balanceMode, lockedTeam]);
+  }, [players, numTeams, teamSize, shuffleSeed, lockedTeam]);
 
   const seededIds = useMemo(() => new Set(result.seededIds || []), [result]);
   const errorMessage = translateError(result, t);
@@ -132,6 +137,7 @@ function App() {
   }
 
   function handlePasteWithDb() {
+    if (!dbSession) return;
     const { players: parsed, warnings: parseWarnings } = parseList(pasteText);
     const matched = matchPlayersFromDatabase(parsed, db);
     setPlayers((prev) => [...prev, ...matched]);
@@ -142,33 +148,79 @@ function App() {
     }
   }
 
-  function handleUploadToDb() {
-    const updated = updateDatabase(normalizePlayers(players), db);
-    if (savePlayerDatabase(updated)) {
-      setDb(updated);
-      flash(t.dbSaved);
+  async function handleUnlockDb(event) {
+    event.preventDefault();
+    if (dbUnlocking) return;
+    setDbUnlocking(true);
+    setDbError(null);
+    const outcome = await unlockPlayerDatabase(dbPassword);
+    setDbPassword("");
+    setDbUnlocking(false);
+    if (outcome.status === "ready") {
+      setDb(outcome.db);
+      setDbSession(outcome.session);
+      setShowDb(true);
+      if (outcome.dropped) flash(t.dbDroppedOnUnlock(outcome.dropped));
+      else if (outcome.merged) flash(t.dbMergedOnUnlock(outcome.merged));
     } else {
-      flash(t.dbSaveFailed);
+      setDbError(outcome.status);
     }
   }
 
-  function handleDeleteDbEntry(name) {
+  function handleLockDb() {
+    if (dbWriteInProgress.current) return;
+    setShowDb(false);
+    setDb([]);
+    setDbSession(null);
+    setDbPassword("");
+    setDbError(null);
+  }
+
+  async function persistDb(updated) {
+    if (!dbSession || dbWriteInProgress.current) return false;
+    dbWriteInProgress.current = true;
+    setDbSaving(true);
+    let saved = false;
+    try {
+      saved = await savePlayerDatabase(updated, dbSession);
+    } finally {
+      dbWriteInProgress.current = false;
+      setDbSaving(false);
+    }
+    if (saved) setDb(updated);
+    else flash(t.dbSaveFailed);
+    return saved;
+  }
+
+  async function handleUploadToDb() {
+    if (dbSession) {
+      const updated = updateDatabase(normalizePlayers(players), db);
+      if (await persistDb(updated)) flash(t.dbSaved);
+      return;
+    }
+    // Locked: the players can be sealed in, but nothing can be read back.
+    if (dbSaving) return;
+    setDbSaving(true);
+    let outcome;
+    try {
+      outcome = await submitPlayersToDatabase(players);
+    } finally {
+      setDbSaving(false);
+    }
+    if (outcome.status === "queued") flash(t.dbQueued(outcome.queued));
+    else if (outcome.status === "locked") flash(t.dbQueueLocked);
+    else if (outcome.status === "full") flash(t.dbQueueFull);
+    else flash(t.dbSaveFailed);
+  }
+
+  async function handleDeleteDbEntry(name) {
     const updated = removeFromDatabase(name, db);
-    if (savePlayerDatabase(updated)) {
-      setDb(updated);
-    } else {
-      flash(t.dbSaveFailed);
-    }
+    await persistDb(updated);
   }
 
-  function handleClearDb() {
+  async function handleClearDb() {
     if (!window.confirm(t.dbClearConfirm)) return;
-    if (savePlayerDatabase([])) {
-      setDb([]);
-      flash(t.dbSaved);
-    } else {
-      flash(t.dbSaveFailed);
-    }
+    if (await persistDb([])) flash(t.dbSaved);
   }
 
   function reshuffleTeams() {
@@ -228,23 +280,10 @@ function App() {
             ${language === "en" ? "Español" : "English"}
           </button>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           ${countField(t.numTeams, numTeamsInput, setNumTeamsInput)}
           ${countField(t.teamSize, teamSizeInput, setTeamSizeInput)}
-          <label class="flex flex-col text-sm text-gray-700">
-            ${t.balancePriority}
-            <select
-              value=${balanceMode}
-              onChange=${(event) => setBalanceMode(event.target.value)}
-              class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
-            >
-              <option value="score">${t.balanceScore}</option>
-              <option value="balanced">${t.balanceBalanced}</option>
-              <option value="positions">${t.balancePositions}</option>
-            </select>
-          </label>
         </div>
-        <p class="mt-3 text-xs text-gray-500">${t.balanceHint}</p>
         ${Number.isInteger(numTeams) &&
         numTeams > 1 &&
         html`<p class="mt-1 text-xs text-gray-500">${t.seedRuleNote(numTeams)}</p>`}
@@ -273,12 +312,14 @@ function App() {
           >
             ${t.addPlayers}
           </button>
-          <button
-            onClick=${handlePasteWithDb}
-            class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
-          >
-            ${t.addPlayersFromDb}
-          </button>
+          ${dbSession && html`
+            <button
+              onClick=${handlePasteWithDb}
+              class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+            >
+              ${t.addPlayersFromDb}
+            </button>
+          `}
         </div>
       </section>
 
@@ -353,7 +394,8 @@ function App() {
           <div class="mt-4 flex flex-wrap justify-end gap-2">
             <button
               onClick=${handleUploadToDb}
-              class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
+              disabled=${dbSaving}
+              class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
             >
               ${t.uploadToDb}
             </button>
@@ -494,18 +536,59 @@ function App() {
         <div class="flex items-center justify-between">
           <div>
             <h2 class="text-xl font-semibold text-gray-900">${t.database}</h2>
-            <p class="text-xs text-gray-500 mt-1">
-              ${t.dbEntries(db.length)} · ${t.dbLocalOnly}
-            </p>
+            ${dbSession && html`
+              <p class="text-xs text-gray-500 mt-1">
+                ${t.dbEntries(db.length)} · ${t.dbLocalOnly}
+              </p>
+            `}
           </div>
-          <button
-            onClick=${() => setShowDb(!showDb)}
-            class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
-          >
-            ${showDb ? t.hideDatabase : t.showDatabase}
-          </button>
+          ${dbSession && html`
+            <div class="flex gap-2">
+              <button
+                onClick=${() => setShowDb(!showDb)}
+                class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+              >
+                ${showDb ? t.hideDatabase : t.showDatabase}
+              </button>
+              <button
+                onClick=${handleLockDb}
+                disabled=${dbSaving}
+                class="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"
+              >
+                ${t.lockDatabase}
+              </button>
+            </div>
+          `}
         </div>
-        ${showDb && html`
+        ${!dbSession && html`
+          <form onSubmit=${handleUnlockDb} class="mt-4 flex flex-wrap items-end gap-3">
+            <label class="flex flex-col text-sm text-gray-700">
+              ${t.dbPassword}
+              <input
+                type="password"
+                value=${dbPassword}
+                onChange=${(event) => setDbPassword(event.target.value)}
+                autocomplete="off"
+                class="mt-1 rounded border-gray-300 focus:border-indigo-500 focus:ring-indigo-500"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled=${dbUnlocking || !dbPassword}
+              class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
+            >
+              ${dbUnlocking ? t.dbUnlocking : t.unlockDatabase}
+            </button>
+          </form>
+          <p class="text-xs text-gray-500 mt-2">${t.dbLockedHint}</p>
+          ${dbError && html`
+            <p class="text-sm text-red-600 mt-2" role="alert">
+              ${dbError === "invalid" ? t.dbWrongPassword :
+                dbError === "corrupt" ? t.dbCorrupt : t.dbUnavailable}
+            </p>
+          `}
+        `}
+        ${dbSession && showDb && html`
           <div class="mt-4">
             ${db.length === 0
               ? html`<p class="text-sm text-gray-500">${t.dbEmpty}</p>`
@@ -521,7 +604,8 @@ function App() {
                           </span>
                           <button
                             onClick=${() => handleDeleteDbEntry(entry.name)}
-                            class="px-2 py-1 text-xs text-red-600 hover:text-red-800"
+                            disabled=${dbSaving}
+                            class="px-2 py-1 text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
                           >
                             ${t.dbDelete}
                           </button>
@@ -538,7 +622,8 @@ function App() {
                     </button>
                     <button
                       onClick=${handleClearDb}
-                      class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+                      disabled=${dbSaving}
+                      class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm disabled:opacity-50"
                     >
                       ${t.dbClear}
                     </button>
