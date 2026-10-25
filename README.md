@@ -44,11 +44,40 @@ names; players without a rating default to 5.
 
 ## Player database
 
-The saved player database stays in this browser. Enter the database password
-to view it, use it for matching, or change its entries. The app encrypts saved
-entries with a key derived from the password and keeps that key only while the
+The saved player database stays in this browser. The app encrypts saved entries
+with a key derived from the database password and keeps that key only while the
 database is unlocked. Older readable browser data is migrated to encrypted
 storage after the first successful unlock in that browser.
+
+**Adding players needs no password. Reading or changing the database does.**
+"Upload current data to database" works while the database is locked; viewing
+the stored list, matching a pasted roster against it, deleting an entry and
+clearing it all stay behind the password.
+
+Additions go into a drop box rather than into the database itself. Each one is
+sealed with an RSA-OAEP public key that sits unencrypted in browser storage,
+and only the matching private key can open it. That private key is stored
+encrypted under the password, alongside the database and under the same salt,
+so the single key derivation done at unlock opens both. The next unlock opens
+the drop box, merges the additions through the same rules as a normal upload —
+existing spellings kept, names matched without regard to accents or casing —
+and empties it.
+
+What this does and does not protect:
+
+- Someone without the password cannot read the database, and cannot read back
+  even the additions they just made. Sealing is one-way.
+- They can see *how many* additions are waiting, and they can add junk entries
+  or delete waiting ones, because browser storage is theirs to write. The drop
+  box is append-only by design, not tamper-proof; it caps at 500 waiting
+  entries so a page left open cannot fill up storage.
+- Additions cannot be checked for duplicates while locked, since that would
+  require reading the database. Duplicates collapse at the next unlock.
+- A browser that has never unlocked the database holds no drop box, so adding
+  reports that there is nothing to add to. The database is per-browser anyway.
+- If the encrypted private key is lost while the database survives, additions
+  still waiting become unreadable. The next unlock reports how many it had to
+  discard rather than dropping them silently.
 
 ## Tests
 

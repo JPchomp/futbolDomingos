@@ -70,7 +70,7 @@ export const translations = {
     unlockDatabase: "Unlock database",
     dbUnlocking: "Unlocking…",
     lockDatabase: "Lock database",
-    dbLockedHint: "Unlock to view or use saved players. Existing entries are encrypted after the first unlock.",
+    dbLockedHint: "Players can be added without the password. Unlock to view, use or change saved players.",
     dbWrongPassword: "Incorrect database password.",
     dbCorrupt: "The encrypted database could not be read. Its stored data was left unchanged.",
     dbUnavailable: "The database could not be unlocked. Check that browser storage is available.",
@@ -86,6 +86,13 @@ export const translations = {
     dbSaveFailed: "Could not save. Browser storage is full or unavailable.",
     dbMatched: (matched, total) => `${matched} of ${total} players matched the database.`,
     dbLocalOnly: "Encrypted in this browser only.",
+    dbQueued: (count) =>
+      `${count} player(s) sealed into the database. They appear once it is unlocked.`,
+    dbQueueLocked: "This browser holds no database yet. It has to be unlocked once first.",
+    dbQueueFull: "Too many players are waiting to be added. Unlock the database to take them in.",
+    dbMergedOnUnlock: (count) => `${count} player(s) added while locked were merged in.`,
+    dbDroppedOnUnlock: (count) =>
+      `${count} player(s) added while locked could not be read and were discarded.`,
     copyFailed: "Copy failed. Please copy manually.",
     copyUnavailable: "Clipboard access unavailable. Please copy manually.",
     copied: "Copied.",
@@ -153,7 +160,7 @@ export const translations = {
     unlockDatabase: "Desbloquear base de datos",
     dbUnlocking: "Desbloqueando…",
     lockDatabase: "Bloquear base de datos",
-    dbLockedHint: "Desbloquéela para ver o usar los jugadores guardados. Las entradas existentes se cifran después del primer desbloqueo.",
+    dbLockedHint: "Se pueden agregar jugadores sin la contraseña. Desbloquéela para ver, usar o modificar los jugadores guardados.",
     dbWrongPassword: "Contraseña incorrecta de la base de datos.",
     dbCorrupt: "No se pudo leer la base de datos cifrada. Los datos guardados no se modificaron.",
     dbUnavailable: "No se pudo desbloquear la base de datos. Compruebe que el almacenamiento del navegador esté disponible.",
@@ -170,6 +177,14 @@ export const translations = {
     dbMatched: (matched, total) =>
       `${matched} de ${total} jugadores coincidieron con la base de datos.`,
     dbLocalOnly: "Cifrada solo en este navegador.",
+    dbQueued: (count) =>
+      `${count} jugador(es) sellado(s) en la base de datos. Aparecerán al desbloquearla.`,
+    dbQueueLocked: "Este navegador aún no tiene base de datos. Hay que desbloquearla una vez primero.",
+    dbQueueFull: "Hay demasiados jugadores esperando. Desbloquee la base de datos para incorporarlos.",
+    dbMergedOnUnlock: (count) =>
+      `Se incorporaron ${count} jugador(es) agregado(s) mientras estaba bloqueada.`,
+    dbDroppedOnUnlock: (count) =>
+      `No se pudieron leer ${count} jugador(es) agregado(s) mientras estaba bloqueada y se descartaron.`,
     copyFailed: "No se pudo copiar. Copie manualmente.",
     copyUnavailable: "Portapapeles no disponible. Copie manualmente.",
     copied: "Copiado.",

@@ -8,6 +8,7 @@ import {
   computeAssignments,
   unlockPlayerDatabase,
   savePlayerDatabase,
+  submitPlayersToDatabase,
   matchPlayersFromDatabase,
   updateDatabase,
   removeFromDatabase,
@@ -159,6 +160,8 @@ function App() {
       setDb(outcome.db);
       setDbSession(outcome.session);
       setShowDb(true);
+      if (outcome.dropped) flash(t.dbDroppedOnUnlock(outcome.dropped));
+      else if (outcome.merged) flash(t.dbMergedOnUnlock(outcome.merged));
     } else {
       setDbError(outcome.status);
     }
@@ -190,8 +193,24 @@ function App() {
   }
 
   async function handleUploadToDb() {
-    const updated = updateDatabase(normalizePlayers(players), db);
-    if (await persistDb(updated)) flash(t.dbSaved);
+    if (dbSession) {
+      const updated = updateDatabase(normalizePlayers(players), db);
+      if (await persistDb(updated)) flash(t.dbSaved);
+      return;
+    }
+    // Locked: the players can be sealed in, but nothing can be read back.
+    if (dbSaving) return;
+    setDbSaving(true);
+    let outcome;
+    try {
+      outcome = await submitPlayersToDatabase(players);
+    } finally {
+      setDbSaving(false);
+    }
+    if (outcome.status === "queued") flash(t.dbQueued(outcome.queued));
+    else if (outcome.status === "locked") flash(t.dbQueueLocked);
+    else if (outcome.status === "full") flash(t.dbQueueFull);
+    else flash(t.dbSaveFailed);
   }
 
   async function handleDeleteDbEntry(name) {
@@ -373,15 +392,13 @@ function App() {
         ${players.length === 0 && html`<p class="text-sm text-gray-500 mt-3">${t.noPlayersYet}</p>`}
         ${players.length > 0 && html`
           <div class="mt-4 flex flex-wrap justify-end gap-2">
-            ${dbSession && html`
-              <button
-                onClick=${handleUploadToDb}
-                disabled=${dbSaving}
-                class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
-              >
-                ${t.uploadToDb}
-              </button>
-            `}
+            <button
+              onClick=${handleUploadToDb}
+              disabled=${dbSaving}
+              class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 disabled:opacity-50"
+            >
+              ${t.uploadToDb}
+            </button>
             <button
               onClick=${() => copyToClipboard(buildClipboardPlayers(players))}
               class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
