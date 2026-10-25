@@ -14,6 +14,7 @@ import {
   matchPlayersFromDatabase,
   updateDatabase,
   removeFromDatabase,
+  sortDatabaseByPositionAndName,
   coerceScore,
   BALANCE_PRESETS,
   MIN_SCORE,
@@ -106,6 +107,8 @@ function App() {
       };
     }
   }, [players, numTeams, teamSize, shuffleSeed, lockedTeam]);
+
+  const sortedDb = useMemo(() => sortDatabaseByPositionAndName(db), [db]);
 
   const seededIds = useMemo(() => new Set(result.seededIds || []), [result]);
   const displayedTeams = useMemo(
@@ -609,7 +612,7 @@ function App() {
               ? html`<p class="text-sm text-gray-500">${t.dbEmpty}</p>`
               : html`
                   <ul class="divide-y divide-gray-200 max-h-72 overflow-y-auto">
-                    ${db.map(
+                    ${sortedDb.map(
                       (entry) => html`
                         <li key=${entry.name} class="flex items-center justify-between py-2 text-sm">
                           <span class="text-gray-800">
@@ -630,7 +633,7 @@ function App() {
                   </ul>
                   <div class="mt-4 flex flex-wrap justify-end gap-2">
                     <button
-                      onClick=${() => copyToClipboard(buildClipboardPlayers(db))}
+                      onClick=${() => copyToClipboard(buildClipboardPlayers(sortedDb))}
                       class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
                     >
                       ${t.dbExport}

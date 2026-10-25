@@ -21,6 +21,7 @@ import {
   DEFAULT_SCORE,
   MIN_SCORE,
   MAX_SCORE,
+  sortDatabaseByPositionAndName,
 } from "../logic.js";
 
 function samplePlayers(count) {
@@ -1019,4 +1020,45 @@ test("the best possible position fit is reached on ordinary rosters", () => {
       `attempt ${attempt}: fitting step left ${result.misfits - result.positionsReleased} misfit(s)`
     );
   }
+});
+
+test("the stored database is shown by position, then by name", () => {
+  const db = [
+    { name: "Zoe", score: 7, pos1: "" },
+    { name: "nico", score: 6, pos1: "DEF" },
+    { name: "Ana", score: 9, pos1: "ST" },
+    { name: "César", score: 8, pos1: "GK" },
+    { name: "Bruno", score: 5, pos1: "DEF" },
+    { name: "Ada", score: 4, pos1: "" },
+    { name: "Omar", score: 6, pos1: "MED" },
+  ];
+  const sorted = sortDatabaseByPositionAndName(db);
+
+  assert.deepEqual(sorted.map((entry) => entry.name), [
+    "César",          // GK first
+    "Bruno", "nico",  // then defenders, alphabetical regardless of casing
+    "Omar",           // then midfield
+    "Ana",            // then attack
+    "Ada", "Zoe",     // players with no position come last
+  ]);
+
+  // Ordering is for display only; the stored array is left as it was.
+  assert.equal(db[0].name, "Zoe");
+});
+
+test("sorting the database tolerates junk and unknown positions", () => {
+  const sorted = sortDatabaseByPositionAndName([
+    { name: "Unknown pos", score: 5, pos1: "SWEEPER" },
+    { name: "Keeper", score: 5, pos1: "gk" },
+    { name: "No position", score: 5, pos1: "" },
+    { name: "Another unknown", score: 5, pos1: "LIBERO" },
+  ]);
+  assert.deepEqual(sorted.map((entry) => entry.name), [
+    "Keeper",            // a known position, lower-cased in storage
+    "Another unknown",   // unrecognised positions keep a stable alphabetical order
+    "Unknown pos",
+    "No position",       // and blanks still come last
+  ]);
+  assert.deepEqual(sortDatabaseByPositionAndName(null), []);
+  assert.deepEqual(sortDatabaseByPositionAndName(undefined), []);
 });

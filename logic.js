@@ -855,6 +855,32 @@ const DB_PENDING_KEY = "futbolDomingos_playerDbPending";
 /** A cap so an unattended page cannot be used to fill up browser storage. */
 export const MAX_PENDING_ENTRIES = 500;
 
+/**
+ * Presentation order for the stored database: positions in the same order the
+ * teams use, then unrecognised positions alphabetically, then the players with
+ * no position at all. Names are unique in the database, so the name settles
+ * every tie. This orders a copy; what gets stored is left alone.
+ */
+export function sortDatabaseByPositionAndName(db) {
+  const rank = (position) => {
+    if (!position) return 5;
+    return DISPLAY_POSITION_ORDER.get(position) ?? 4;
+  };
+  return [...(db || [])].sort((a, b) => {
+    const positionA = normalizePosition(a?.pos1);
+    const positionB = normalizePosition(b?.pos1);
+    const rankA = rank(positionA);
+    const rankB = rank(positionB);
+    if (rankA !== rankB) return rankA - rankB;
+    if (rankA === 4 && positionA !== positionB) {
+      return positionA.localeCompare(positionB, undefined, { sensitivity: "base" });
+    }
+    return String(a?.name ?? "").localeCompare(
+      String(b?.name ?? ""), undefined, { sensitivity: "base" }
+    );
+  });
+}
+
 /** Drop anything malformed so a corrupted key can never crash the app. */
 export function sanitizeDatabase(db) {
   if (!Array.isArray(db)) return [];
