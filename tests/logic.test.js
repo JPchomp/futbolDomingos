@@ -6,7 +6,9 @@ import {
   parseListIgnoreNumbers,
   buildClipboardTeams,
   buildClipboardTeamsWithScores,
+  buildClipboardTeamsWithPositions,
   buildClipboardPlayers,
+  sortPlayersByPositionAndScore,
   computeAssignments,
   matchPlayersFromDatabase,
   updateDatabase,
@@ -134,6 +136,51 @@ test("buildClipboardTeamsWithScores outputs team score and player scores", () =>
   assert.match(text, /Bob DF 7\.5/);
   assert.match(text, /Team 2 12\.0/);
   assert.match(text, /Carlos 6/);
+});
+
+test("final team ordering handles position aliases, score ties, and invalid scores without mutation", () => {
+  const players = [
+    { id: "9", name: "Unknown", pos1: "ZZ", score: 10 },
+    { id: "8", name: "Attacker", pos1: "A", score: 10 },
+    { id: "7", name: "Midfielder", pos1: "MF", score: 8 },
+    { id: "6", name: "Defender low", pos1: "D", score: 5 },
+    { id: "5", name: "Defender invalid", pos1: "DF", score: "bad" },
+    { id: "4", name: "alex", pos1: "DF", score: 9 },
+    { id: "3", name: "Alex", pos1: "D", score: 9 },
+    { id: "2", name: "Keeper", pos1: "GK", score: 0 },
+    { id: "1", name: "Defender missing", pos1: "DF" },
+  ];
+  const originalOrder = players.map((player) => player.id);
+  const sorted = sortPlayersByPositionAndScore(players);
+  assert.deepEqual(sorted.map((player) => player.id), ["2", "3", "4", "6", "5", "1", "7", "8", "9"]);
+  assert.deepEqual(players.map((player) => player.id), originalOrder);
+  assert.notStrictEqual(sorted, players);
+});
+
+test("all team clipboard formats share the final player order and preserve team sequence", () => {
+  const teams = [
+    {
+      name: "Team 2", score: 15,
+      members: [
+        { id: "a", name: "Forward", pos1: "FW", score: 8 },
+        { id: "b", name: "Defender", pos1: "DF", score: 7 },
+        { id: "c", name: "Keeper", pos1: "GK", score: 6 },
+      ],
+    },
+    { name: "Team 1", score: 5, members: [{ id: "d", name: "Solo", pos1: "M", score: 5 }] },
+  ];
+  assert.deepEqual(buildClipboardTeams(teams).trim().split("\n"), [
+    "Team 2 - White", "Keeper", "Defender", "Forward", "", "Team 1 - Black", "Solo",
+  ]);
+  assert.deepEqual(buildClipboardTeamsWithScores(teams).trim().split("\n"), [
+    "Team 2 15.0", "Keeper GK 6.0", "Defender DF 7.0", "Forward FW 8.0",
+    "", "Team 1 5.0", "Solo M 5.0",
+  ]);
+  assert.deepEqual(buildClipboardTeamsWithPositions(teams).trim().split("\n"), [
+    "Team 2", "Keeper (GK)", "Defender (DF)", "Forward (FW)",
+    "", "Team 1", "Solo (M)",
+  ]);
+  assert.deepEqual(teams[0].members.map((member) => member.id), ["a", "b", "c"]);
 });
 
 test("computeAssignments creates balanced teams and subs", () => {
